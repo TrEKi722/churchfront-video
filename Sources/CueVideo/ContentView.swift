@@ -235,9 +235,13 @@ struct ConnectView: View {
     var body: some View {
         VStack(spacing: T.s4) {
             Spacer()
-            Text("Connect to your ATEM").font(.sans(26, .bold))
-            Text("Churchfront Video talks to the switcher directly over your network. No Blackmagic software needed.\nFind the switcher's IP address in ATEM Setup under Network.")
+            Text(store.config.switcher == .goStream ? "Connect to your GoStream" : "Connect to your ATEM").font(.sans(26, .bold))
+            Text(store.config.switcher == .goStream
+                 ? "Churchfront Video talks to the switcher directly over your network.\nFind the GoStream's IP address in its network settings."
+                 : "Churchfront Video talks to the switcher directly over your network. No Blackmagic software needed.\nFind the switcher's IP address in ATEM Setup under Network.")
                 .font(.sans(14)).foregroundStyle(T.inkMuted).multilineTextAlignment(.center)
+            Segments(items: [("ATEM", SwitcherKind.atem), ("OSEE GoStream", SwitcherKind.goStream)],
+                     selection: Binding(get: { store.config.switcher }, set: { v in store.update { $0.switcher = v } }))
             HStack {
                 TextField("Such as 192.168.1.240", text: $host)
                     .textFieldStyle(.plain).font(.sans(16))

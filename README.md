@@ -39,6 +39,22 @@ M/E volunteers run, the source row, key buttons, cameras and each camera's saved
 shots. The app picks up edits to the file within a second, so a person or Claude
 can set Churchfront Video up by editing it. The camera admin login is never in this file.
 
+## OSEE GoStream (experimental)
+
+Besides the ATEM, Churchfront Video can drive an OSEE GoStream Deck or Duet over its network
+protocol (TCP 19010). Pick **OSEE GoStream** under Setup > Switcher, or set `"switcher": "goStream"`
+next to `atemHost` in the setup file. The protocol comes from the community Bitfocus Companion module,
+not from OSEE, and this has not been run against real hardware yet.
+
+- A GoStream has one mix bus, shown as M/E 1: source row, Next/Live, Cut, Auto, Fade to Black,
+  transition style (Mix, Dip, Wipe), mix rate, Stream and Record. It has no aux outputs, upstream
+  keys, DSKs, macros or T-bar here, so those panels stay empty and their buttons do nothing.
+- Source names show as "Input 1" to "Input 4" for now.
+- `python3 Tools/gostream_probe.py <ip>` reads the switcher without changing anything and prints what it says.
+- `python3 Tools/fake_gostream.py 19010` is a pretend GoStream for trying the app without one:
+  `CUEVIDEO_HOST=127.0.0.1 CUEVIDEO_SWITCHER=gostream "./Churchfront Video.app/Contents/MacOS/CueVideo"`.
+  The built-in self-test only drives the fake ATEM.
+
 ## Claude (MCP)
 
 `Churchfront Video.app/Contents/MacOS/cuevideo-mcp` is an MCP server with a tool for every

@@ -77,6 +77,18 @@ public struct ATEMState: Equatable {
     public func name(_ id: Int?) -> String { id.map { inputs[$0]?.short ?? "\($0)" } ?? "?" }
 }
 
+/// Which kind of switcher the client talks to. A GoStream is driven through the same
+/// client, so the rest of the app doesn't need to know the difference.
+public enum SwitcherKind: String, Codable, CaseIterable {
+    case atem
+    case goStream
+
+    /// Reads "goStream", "gostream" or "GoStream"; anything else is an ATEM.
+    public static func parse(_ text: String) -> SwitcherKind {
+        text.lowercased() == "gostream" ? .goStream : .atem
+    }
+}
+
 public enum ATEMLink: Equatable {
     case idle
     case connecting
@@ -123,6 +135,7 @@ public final class ATEMClient: ObservableObject {
     @Published public private(set) var state = ATEMState()
     @Published public private(set) var link: ATEMLink = .idle
     @Published public private(set) var host = ""
+    @Published public private(set) var kind: SwitcherKind = .atem
     /// Which end of the T-bar is at rest, per M/E. Flips when a transition
     /// finishes, as on a hardware panel.
     @Published public private(set) var tbarAtTop: [Int: Bool] = [:]
@@ -145,6 +158,8 @@ public final class ATEMClient: ObservableObject {
     private var timer: DispatchSourceTimer?
     private var s = ATEMState()
     private var lastPosition: [Int: Double] = [:]
+    private var goStream: GoStreamClient?
+    private var goStreamWatch: [AnyCancellable] = []
 
     private enum Flag {
         static let ackRequest: UInt8 = 0x01, newSession: UInt8 = 0x02, retransmit: UInt8 = 0x04
@@ -156,8 +171,12 @@ public final class ATEMClient: ObservableObject {
 
     // MARK: Connection
 
-    public func connect(_ host: String, port: UInt16 = 9910) {
+    public func connect(_ host: String, port: UInt16? = nil, kind: SwitcherKind = .atem) {
         let h = host.trimmingCharacters(in: .whitespaces)
+        if kind == .goStream { connectGoStream(h, port: port ?? GoStreamClient.defaultPort); return }
+        stopGoStream()
+        self.kind = .atem
+        let port = port ?? 9910
         self.host = h
         link = h.isEmpty ? .idle : .connecting
         queue.async {
@@ -177,6 +196,7 @@ public final class ATEMClient: ObservableObject {
     }
 
     public func disconnect() {
+        stopGoStream()
         host = ""
         link = .idle
         queue.async {
@@ -188,6 +208,51 @@ public final class ATEMClient: ObservableObject {
     }
 
     private func now() -> Double { ProcessInfo.processInfo.systemUptime }
+
+    // MARK: GoStream
+
+    private func connectGoStream(_ h: String, port: UInt16) {
+        // Let go of any ATEM session first.
+        queue.async {
+            self.target = ""
+            self.timer?.cancel(); self.timer = nil
+            self.conn?.cancel(); self.conn = nil
+            self.connected = false; self.ready = false
+        }
+        stopGoStream()
+        kind = .goStream
+        host = h
+        state = ATEMState()
+        guard !h.isEmpty else { link = .idle; return }
+        link = .connecting
+        let g = GoStreamClient()
+        goStream = g
+        goStreamWatch = [
+            g.$state.receive(on: DispatchQueue.main).sink { [weak self] gs in
+                guard let self, self.goStream === g else { return }
+                let mapped = ATEMState(goStream: gs)
+                if self.state != mapped { self.state = mapped }
+            },
+            g.$link.receive(on: DispatchQueue.main).sink { [weak self] l in
+                guard let self, self.goStream === g else { return }
+                if self.link != l { self.link = l }
+            },
+        ]
+        g.connect(host: h, port: port)
+    }
+
+    private func stopGoStream() {
+        goStreamWatch.removeAll()
+        goStream?.disconnect()
+        goStream = nil
+    }
+
+    /// Sends one GoStream command and records it in the Status log under a plain label.
+    private func goStreamSend(_ label: String, _ command: GoStreamCommand) {
+        let ok = goStream?.send(command) ?? false
+        sentLog.append(ATEMLogEntry(time: Date(), command: label, data: [], sent: ok))
+        if sentLog.count > 60 { sentLog.removeFirst(sentLog.count - 60) }
+    }
 
     private func open() {
         conn?.cancel()
@@ -395,6 +460,8 @@ public final class ATEMClient: ObservableObject {
     }
 
     private func send(_ name: String, _ data: [UInt8]) {
+        // Keys, DSKs, aux, macros and T-bar are ATEM-only; a GoStream ignores them.
+        if kind == .goStream { return }
         queue.async {
             let ok = self.connected && self.ready
             let entry = ATEMLogEntry(time: Date(), command: name, data: data, sent: ok)
@@ -420,23 +487,58 @@ public final class ATEMClient: ObservableObject {
     private func hl(_ v: Int) -> [UInt8] { let c = UInt16(clamping: max(0, v)); return [UInt8(c >> 8), UInt8(c & 0xFF)] }
     private func b(_ v: Int) -> UInt8 { UInt8(clamping: max(0, v)) }
 
-    public func setProgram(_ source: Int, me: Int = 0) { send("CPgI", [b(me), 0] + hl(source)) }
-    public func setPreview(_ source: Int, me: Int = 0) { send("CPvI", [b(me), 0] + hl(source)) }
-    public func cut(me: Int = 0) { send("DCut", [b(me), 0, 0, 0]) }
-    public func auto(me: Int = 0) { send("DAut", [b(me), 0, 0, 0]) }
+    public func setProgram(_ source: Int, me: Int = 0) {
+        if kind == .goStream { if me == 0 { goStreamSend("Program: input \(source)", GoStreamCommands.setProgram(source)) }; return }
+        send("CPgI", [b(me), 0] + hl(source))
+    }
+    public func setPreview(_ source: Int, me: Int = 0) {
+        if kind == .goStream { if me == 0 { goStreamSend("Preview: input \(source)", GoStreamCommands.setPreview(source)) }; return }
+        send("CPvI", [b(me), 0] + hl(source))
+    }
+    public func cut(me: Int = 0) {
+        if kind == .goStream { if me == 0 { goStreamSend("Cut", GoStreamCommands.cut()) }; return }
+        send("DCut", [b(me), 0, 0, 0])
+    }
+    public func auto(me: Int = 0) {
+        if kind == .goStream { if me == 0 { goStreamSend("Auto transition", GoStreamCommands.auto()) }; return }
+        send("DAut", [b(me), 0, 0, 0])
+    }
     /// 0 to 1 from the start of the transition.
     public func setPosition(_ v: Double, me: Int = 0) { send("CTPs", [b(me), 0] + hl(Int((min(1, max(0, v)) * 10000).rounded()))) }
-    public func setStyle(_ style: Int, me: Int = 0) { send("CTTp", [1, b(me), b(style), 0]) }
+    public func setStyle(_ style: Int, me: Int = 0) {
+        if kind == .goStream {
+            // A GoStream has Mix, Dip and Wipe; DVE and Sting don't exist there.
+            let names = ["Mix", "Dip", "Wipe"]
+            if me == 0, names.indices.contains(style) { goStreamSend("Transition: \(names[style])", GoStreamCommands.setTransitionStyle(names[style])) }
+            return
+        }
+        send("CTTp", [1, b(me), b(style), 0])
+    }
     public func setNextSelection(_ mask: Int, me: Int = 0) { send("CTTp", [2, b(me), 0, b(max(1, mask))]) }
-    public func setMixRate(_ frames: Int, me: Int = 0) { send("CTMx", [b(me), b(min(250, max(1, frames))), 0, 0]) }
+    public func setMixRate(_ frames: Int, me: Int = 0) {
+        if kind == .goStream {
+            if me == 0 { goStreamSend("Mix rate: \(frames) frames", GoStreamCommands.setMixRate(min(250, max(1, frames)))) }
+            return
+        }
+        send("CTMx", [b(me), b(min(250, max(1, frames))), 0, 0])
+    }
     public func setKeyOnAir(_ keyer: Int, _ on: Bool, me: Int = 0) { send("CKOn", [b(me), b(keyer), on ? 1 : 0, 0]) }
     public func setDSKOnAir(_ dsk: Int, _ on: Bool) { send("CDsL", [b(dsk), on ? 1 : 0, 0, 0]) }
     public func setDSKTie(_ dsk: Int, _ on: Bool) { send("CDsT", [b(dsk), on ? 1 : 0, 0, 0]) }
     public func dskAuto(_ dsk: Int) { send("DDsA", [b(dsk), 0, 0, 0]) }
-    public func fadeToBlack(me: Int = 0) { send("FtbA", [b(me), 0, 0, 0]) }
+    public func fadeToBlack(me: Int = 0) {
+        if kind == .goStream { if me == 0 { goStreamSend("Fade to black", GoStreamCommands.ftb()) }; return }
+        send("FtbA", [b(me), 0, 0, 0])
+    }
     public func setAux(_ aux: Int, _ source: Int) { send("CAuS", [1, b(aux)] + hl(source)) }
     public func runMacro(_ index: Int) { send("MAct", hl(index) + [0, 0]) }
     public func stopMacro() { send("MAct", [0xFF, 0xFF, 1, 0]) }
-    public func setStreaming(_ on: Bool) { send("StrR", [on ? 1 : 0, 0, 0, 0]) }
-    public func setRecording(_ on: Bool) { send("RcTM", [on ? 1 : 0, 0, 0, 0]) }
+    public func setStreaming(_ on: Bool) {
+        if kind == .goStream { goStreamSend("Streaming \(on ? "start" : "stop")", GoStreamCommands.live(on)); return }
+        send("StrR", [on ? 1 : 0, 0, 0, 0])
+    }
+    public func setRecording(_ on: Bool) {
+        if kind == .goStream { goStreamSend("Recording \(on ? "start" : "stop")", on ? GoStreamCommands.startRecord() : GoStreamCommands.stopRecord()); return }
+        send("RcTM", [on ? 1 : 0, 0, 0, 0])
+    }
 }

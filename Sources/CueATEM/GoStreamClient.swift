@@ -17,8 +17,13 @@ public struct GoStreamState: Equatable {
     /// hardware yet, so nothing interprets them.
     public var streamStatus: [Int: Int] = [:]
     public var recordStatus: Int?
-    public var deviceType: String?
+    /// The device type number the switcher reports (0 Deck, 1 Duet SDI, 10 Duet 8 ISO, ...).
+    public var deviceModel: Int?
     public var firmware: String?
+    /// Source numbers the switcher says it has as inputs, from `inputList`.
+    public var inputs: [Int] = []
+    /// Fade to black: 0 off, 1 fully black, 2 fading.
+    public var ftb: Int?
 
     public init() {}
 }
@@ -90,8 +95,10 @@ public final class GoStreamClient: ObservableObject {
     /// Asks for everything we track. Replies arrive as `get` packets, changes as `pus`.
     public func requestState() {
         send([
-            GoStreamCommands.get("deviceType"),
-            GoStreamCommands.get("version"),
+            GoStreamCommands.get(GoStreamID.deviceType),
+            GoStreamCommands.get(GoStreamID.version),
+            GoStreamCommands.get(GoStreamID.inputList),
+            GoStreamCommands.get(GoStreamID.ftbStatus),
             GoStreamCommands.get(GoStreamID.pgmIndex),
             GoStreamCommands.get(GoStreamID.pvwIndex),
             GoStreamCommands.get(GoStreamID.transitionStatus),
@@ -142,10 +149,17 @@ public final class GoStreamClient: ObservableObject {
         case GoStreamID.liveStreamOutputStatus:
             if numbers.count >= 2 { next.streamStatus[numbers[0]] = numbers[1] }
         case GoStreamID.recordStatus: next.recordStatus = numbers.first
-        case "deviceType":
-            if case .string(let s)? = first { next.deviceType = s }
-        case "version":
+        case GoStreamID.ftbStatus: next.ftb = numbers.first
+        case GoStreamID.deviceType: next.deviceModel = numbers.first
+        case GoStreamID.version:
             if case .string(let s)? = first { next.firmware = s }
+        case GoStreamID.inputList:
+            // Companion reads this as a list of source numbers, either as numbers or one "1,2,3,4" string.
+            if case .string(let s)? = first {
+                next.inputs = s.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            } else {
+                next.inputs = numbers
+            }
         default: break
         }
         if next != state { state = next }

@@ -135,7 +135,10 @@ struct RouteButton: Codable, Hashable, Identifiable {
 /// `ndi` names an NDI source exactly as it appears on the network (Setup lists them).
 /// `proto` is canonXC (Canon HTTP), sonyUDP (VISCA over IP, UDP 52381) or rawTCP (VISCA over TCP 5678).
 struct CueConfig: Codable, Equatable {
+    /// The switcher's IP address. (Still named atemHost so existing setups keep working; a GoStream uses it too.)
     var atemHost = ""
+    /// "atem" (the default) or "goStream" (an OSEE GoStream Deck or Duet, port 19010).
+    var switcher = SwitcherKind.atem
     /// The M/E the volunteer runs, counted from 1 as on the switcher.
     var me = 1
     /// The volunteer's source row, left to right. Inputs not listed stay out of their way.
@@ -166,11 +169,13 @@ struct CueConfig: Codable, Equatable {
 
     init() {}
 
-    private enum Keys: String, CodingKey { case atemHost, me, sources, cameras, keys, trackSpeed, ptzSpeed, trackTilt, trackZoom, mixNames, pictures, screens, routes, framing, trackTuning }
+    private enum Keys: String, CodingKey { case atemHost, switcher, me, sources, cameras, keys, trackSpeed, ptzSpeed, trackTilt, trackZoom, mixNames, pictures, screens, routes, framing, trackTuning }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         atemHost = try c.decodeIfPresent(String.self, forKey: .atemHost) ?? ""
+        // Read as text so an unknown value falls back to ATEM instead of making the whole file unreadable.
+        switcher = SwitcherKind.parse((try? c.decodeIfPresent(String.self, forKey: .switcher)).flatMap { $0 } ?? "")
         me = try c.decodeIfPresent(Int.self, forKey: .me) ?? 1
         sources = try c.decodeIfPresent([VolunteerSource].self, forKey: .sources) ?? []
         cameras = try c.decodeIfPresent([PTZCamera].self, forKey: .cameras) ?? []
@@ -318,7 +323,7 @@ final class ConfigStore: ObservableObject {
         let me = max(0, config.me - 1)
         if b.me != me { b.me = me }
         guard !readOnly else { return }
-        if b.atem.host != config.atemHost { b.atem.connect(config.atemHost) }
+        if b.atem.host != config.atemHost || b.atem.kind != config.switcher { b.atem.connect(config.atemHost, kind: config.switcher) }
         if b.ptz.cameras != config.cameras { b.ptz.cameras = config.cameras }
     }
 

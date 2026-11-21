@@ -161,6 +161,11 @@ public enum GoStreamID {
     public static let cutTransition = "cutTransition"
     public static let autoTransition = "autoTransition"
     public static let transitionStatus = "transitionStatus"
+    public static let ftb = "ftb"
+    public static let ftbStatus = "ftbStatus"
+    public static let inputList = "inputList"
+    public static let deviceType = "deviceType"
+    public static let version = "version"
     public static let transitionStyle = "transitionStyle"
     public static let transitionMixRate = "transitionMixRate"
     public static let transitionDipRate = "transitionDipRate"
@@ -208,6 +213,10 @@ public enum GoStreamCommands {
     /// Starts (true) or stops (false) the live stream.
     public static func live(_ on: Bool) -> GoStreamCommand {
         GoStreamCommand(id: GoStreamID.live, type: .set, value: [.number(on ? 1 : 0)])
+    }
+    /// Fade to black (no value). Not on every model.
+    public static func ftb() -> GoStreamCommand {
+        GoStreamCommand(id: GoStreamID.ftb, type: .set)
     }
     public static func startRecord() -> GoStreamCommand {
         GoStreamCommand(id: GoStreamID.recordStart, type: .set)

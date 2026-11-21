@@ -32,3 +32,50 @@ final class GoStreamTests: XCTestCase {
         XCTAssertTrue(decoder.feed(frame).isEmpty)
     }
 }
+
+final class GoStreamBridgeTests: XCTestCase {
+    func testWaitsForFirstProgramReply() {
+        let s = ATEMState(goStream: GoStreamState())
+        XCTAssertTrue(s.inputs.isEmpty)
+        XCTAssertNil(s.program[0])
+    }
+
+    func testMapsProgramPreviewAndTally() {
+        var g = GoStreamState()
+        g.deviceModel = 0
+        g.program = 2
+        g.preview = 3
+        g.inputs = [1, 2, 3, 4]
+        g.transitionStyle = "Wipe"
+        g.ftb = 1
+        let s = ATEMState(goStream: g)
+        XCTAssertEqual(s.product, "GoStream Deck")
+        XCTAssertEqual(s.program[0], 2)
+        XCTAssertEqual(s.preview[0], 3)
+        XCTAssertEqual(s.style[0], 2)
+        XCTAssertEqual(s.ftbBlack[0], true)
+        XCTAssertEqual(s.tally[2], 1)
+        XCTAssertEqual(s.tally[3], 2)
+        XCTAssertEqual(s.inputs.count, 4)
+        XCTAssertEqual(s.auxCount, 0)
+        XCTAssertEqual(s.dskCount, 0)
+    }
+
+    func testStreamAndRecordFlags() {
+        var g = GoStreamState()
+        g.program = 1
+        XCTAssertFalse(ATEMState(goStream: g).hasStreaming)
+        g.streamStatus = [0: 1]
+        g.recordStatus = 1
+        let s = ATEMState(goStream: g)
+        XCTAssertTrue(s.hasStreaming && s.streaming)
+        XCTAssertTrue(s.hasRecording && s.recording)
+    }
+
+    func testSwitcherKindParsing() {
+        XCTAssertEqual(SwitcherKind.parse("goStream"), .goStream)
+        XCTAssertEqual(SwitcherKind.parse("GoStream"), .goStream)
+        XCTAssertEqual(SwitcherKind.parse(""), .atem)
+        XCTAssertEqual(SwitcherKind.parse("whatever"), .atem)
+    }
+}

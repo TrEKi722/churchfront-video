@@ -104,7 +104,14 @@ struct SetupTab: View {
     // MARK: Switcher
 
     var switcher: some View {
-        Card(title: "ATEM switcher") {
+        Card(title: "Switcher") {
+            labeled("Type") {
+                Segments(items: [("ATEM", SwitcherKind.atem), ("OSEE GoStream", SwitcherKind.goStream)],
+                         selection: Binding(get: { store.config.switcher }, set: { v in store.update { $0.switcher = v } }))
+                if store.config.switcher == .goStream {
+                    Text("One mix bus: no aux, keys or macros").font(.sans(12)).foregroundStyle(T.inkMuted)
+                }
+            }
             labeled("Address") {
                 TextField("IP address", text: $host).textFieldStyle(CueFieldStyle()).frame(width: 200)
                     .onSubmit { store.update { $0.atemHost = host.trimmingCharacters(in: .whitespaces) } }
@@ -113,7 +120,7 @@ struct SetupTab: View {
                 LinkPill()
             }
             labeled("Model") {
-                Text(atem.state.product.isEmpty ? "Unknown until connected" : "\(atem.state.product), protocol \(atem.state.version)")
+                Text(atem.state.product.isEmpty ? "Unknown until connected" : "\(atem.state.product), \(atem.kind == .goStream ? "firmware" : "protocol") \(atem.state.version)")
                     .font(.sans(13)).foregroundStyle(atem.state.product.isEmpty ? T.inkSubtle : T.ink)
             }
             if atem.state.meCount > 1 {
