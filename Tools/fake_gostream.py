@@ -25,6 +25,8 @@ class Deck:
         if typ == "get":
             if id_ in self.s:
                 out.append((id_, self.s[id_]))
+            else:  # the real Deck (firmware 2.1.4) answers an unknown ID like this, without naming it
+                return [("parse_error", "err", ["PARSE_ERROR_NOT_FOND_ID"])]
         elif typ == "set":
             s = self.s
             if id_ in ("pgmIndex", "pvwIndex", "transitionMixRate"):

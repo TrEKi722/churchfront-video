@@ -4,7 +4,7 @@
     python3 Tools/gostream_probe.py 192.168.0.215            # default port 19010
     python3 Tools/gostream_probe.py 192.168.0.215 --port 19010 --seconds 5
 
-Prints every packet the switcher sends back, so we can confirm the IDs and value
+Asks one question at a time and prints every packet the switcher sends back, so we can confirm the IDs and value
 shapes in Sources/CueATEM/GoStream.swift against real hardware. Press buttons on the
 switcher while it runs to see its `pus` pushes. Never sends set commands.
 """
@@ -57,42 +57,60 @@ class Decoder:
                 out.append(("bad json", frame[5:-2]))
 
 GETS = [
-    ("deviceType", None), ("version", None), ("buildInfo", None), ("deviceId", None),
+    ("deviceType", None), ("deviceName", None), ("version", None), ("buildInfo", None), ("deviceId", None),
+    ("inputList", None),
     ("pgmIndex", None), ("pvwIndex", None),
     ("transitionStatus", None), ("transitionStyle", None), ("transitionMixRate", None),
-    ("previewTransition", None),
-    ("liveStreamOutputStatus", [0]), ("liveStreamOutputEnable", [0]),
-    ("recordStatus", None),
+    ("transitionRate", None), ("previewTransition", None), ("ftbStatus", None),
+    ("liveStreamOutputStatus", [0]), ("liveStreamOutputEnable", [0]), ("live", None),
+    ("recordStatus", None), ("recordFormat", None), ("recordDuration", None),
 ]
+
+def show(pkt, asked=None):
+    if not isinstance(pkt, dict):
+        print("<-", pkt)
+    elif pkt.get("type") == "err":
+        print(f"<- ERROR for {asked or '?'}: {pkt.get('value')}")
+    else:
+        print("<-", json.dumps(pkt))
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("host")
     ap.add_argument("--port", type=int, default=19010)
-    ap.add_argument("--seconds", type=float, default=4.0, help="how long to listen after asking")
+    ap.add_argument("--seconds", type=float, default=4.0,
+                    help="how long to keep listening after the queries, to catch pushes when you press buttons")
     args = ap.parse_args()
 
     s = socket.create_connection((args.host, args.port), timeout=5)
-    s.settimeout(0.5)
+    s.settimeout(0.1)
     dec = Decoder()
+
+    def listen(duration, asked=None):
+        end = time.time() + duration
+        while time.time() < end:
+            try:
+                data = s.recv(65536)
+            except socket.timeout:
+                continue
+            if not data:
+                print("switcher closed the connection")
+                return False
+            for pkt in dec.feed(data):
+                show(pkt, asked)
+        return True
+
+    # One at a time, so an error reply can be matched to the command that caused it.
     for id_, value in GETS:
         obj = {"id": id_, "type": "get"}
         if value is not None:
             obj["value"] = value
         print("->", json.dumps(obj))
         s.sendall(pack(obj))
-        time.sleep(0.05)
-    end = time.time() + args.seconds
-    while time.time() < end:
-        try:
-            data = s.recv(65536)
-        except socket.timeout:
-            continue
-        if not data:
-            print("switcher closed the connection")
-            break
-        for pkt in dec.feed(data):
-            print("<-", json.dumps(pkt) if isinstance(pkt, dict) else pkt)
+        if not listen(0.4, id_):
+            return
+    print(f"-- listening for {args.seconds:g} s: press buttons on the switcher to see what it pushes --")
+    listen(args.seconds)
     s.close()
 
 if __name__ == "__main__":
