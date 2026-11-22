@@ -38,9 +38,9 @@ enum ShotSize: String, CaseIterable, Identifiable {
     /// while CueVideo runs (Setup, the config file, or Claude's set_framing).
     var standard: FramingRule {
         switch self {
-        case .shoulders: return FramingRule(eyeLine: 0.29, scale: 0.36, leadRoom: 0.09, deadX: 0.08, deadY: 0.05)
-        case .waist: return FramingRule(eyeLine: 0.29, scale: 0.21, leadRoom: 0.11, deadX: 0.07, deadY: 0.05)
-        case .full: return FramingRule(eyeLine: 0.12, scale: 0.097, leadRoom: 0.13, deadX: 0.06, deadY: 0.04)
+        case .shoulders: return FramingRule(eyeLine: 0.29, scale: 0.36, leadRoom: 0.09, deadX: 0.11, deadY: 0.07)
+        case .waist: return FramingRule(eyeLine: 0.29, scale: 0.21, leadRoom: 0.11, deadX: 0.11, deadY: 0.07)
+        case .full: return FramingRule(eyeLine: 0.12, scale: 0.097, leadRoom: 0.13, deadX: 0.09, deadY: 0.06)
         }
     }
     /// The rule in use now: the standard with any changes from the setup file.
@@ -524,8 +524,12 @@ final class AutoTracker: ObservableObject {
         // Edge alarm: how close their body is to the side of the frame they're heading for,
         // 0 (comfortable) to 1 (touching it). Near the edge the camera corrects harder.
         // Their body's edge, or on a tight shot (body wider than half the frame) their head.
+        // A raised or outstretched arm widens the body box, so only count the box out to about
+        // shoulder width from the eyes (shoulders from the eye-to-shoulder scale, plus some).
         let box = person.box
-        let gap = box.width < 0.5 ? (ex > 0 ? 1 - box.maxX : box.minX)
+        let reach = max(0.06, (person.scale ?? 0.2) * 0.9)
+        let bodyLeft = max(box.minX, eye.x - reach), bodyRight = min(box.maxX, eye.x + reach)
+        let gap = box.width < 0.5 ? (ex > 0 ? 1 - bodyRight : bodyLeft)
                                   : (ex > 0 ? 1 - eye.x : eye.x) - 0.1
         let urgency = min(1, max(0, (0.2 - gap) / 0.2))
 
@@ -541,12 +545,17 @@ final class AutoTracker: ObservableObject {
         // toward the mark (stronger near the edge). Tested in simulation against a camera that
         // turns faster or slower than expected and a picture delay of 0.3 to 0.65 s: it keeps
         // up with walking and settles without hunting. Speed-ups are limited so moves start smoothly.
+        // Starts and stops are eased: the speed changes by at most `accel` (frames a second, each
+        // second) going up and `decel` coming down, and stopping runs the speed down rather than
+        // cutting it. tune.ease scales both (below 1 is softer, above 1 is snappier); near the
+        // frame edge the limits open up so the camera can still catch someone.
+        let ease = max(0.1, tune.ease ?? 1.0)
         func rate(_ e: Double, _ move: Double, _ on: Bool, _ prev: Double) -> Double {
-            guard on else { return 0 }
             let kp = min(2.5, min(1.6, (tune.correction ?? 1.2) * k) * (1 + 1.5 * urgency))
-            let want = move + kp * e
-            let accel = (urgency > 0.3 ? 16.0 : 8.0 * max(1, k)) * dtFrame
-            let decel = 16.0 * max(1, k) * dtFrame
+            let want = on ? move + kp * e : 0
+            let urgent = urgency > 0.3
+            let accel = (urgent ? 2.5 : 0.5) * ease * max(1, k) * dtFrame
+            let decel = (urgent ? 4.0 : 0.8) * ease * max(1, k) * dtFrame
             let step = abs(want) < abs(prev) || want * prev < 0 ? decel : accel
             return prev + max(-step, min(step, want - prev))
         }
