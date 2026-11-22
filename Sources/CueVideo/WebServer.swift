@@ -3,6 +3,7 @@ import Network
 import ImageIO
 import CoreGraphics
 import Combine
+import CueATEM
 
 /// A web page for an iPad (or any browser on the same network) that runs the booth while the
 /// Mac is used for other things. Off until turned on in Setup. It listens on port 9912, and
