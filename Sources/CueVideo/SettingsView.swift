@@ -661,7 +661,7 @@ enum StatusReport {
         out += "\n\nCAMERAS\n"
         out += b.ptz.cameras.map { c in cameraRows(c, b).map { "\($0.0): \($0.1)" }.joined(separator: "\n") }.joined(separator: "\n\n")
         out += "\n\nCOMMANDS SENT (newest first)\n"
-        out += b.atem.sentLog.reversed().map { "\(time($0.time)) \($0.command) \($0.describe(b.atem.state))\($0.sent ? "" : " [not sent]")" }.joined(separator: "\n")
+        out += b.atem.sentLog.reversed().map { "\(time($0.time)) \(b.atem.kind == .goStream ? $0.command : "\($0.command) \($0.describe(b.atem.state))")\($0.sent ? "" : " [not sent]")" }.joined(separator: "\n")
         out += "\n\nCONFIG\n" + configRows(b.store).map { "\($0.0): \($0.1)" }.joined(separator: "\n")
         if let data = try? Data(contentsOf: b.store.url), let json = String(data: data, encoding: .utf8) { out += "\n\n" + json }
         return out
