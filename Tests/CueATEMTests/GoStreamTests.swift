@@ -79,3 +79,41 @@ final class GoStreamBridgeTests: XCTestCase {
         XCTAssertEqual(SwitcherKind.parse("whatever"), .atem)
     }
 }
+
+final class GoStreamOldFirmwareTests: XCTestCase {
+    /// Firmware 2.1.4 (seen on a real Deck): sources count from 0, no inputList, `live` for streaming.
+    func testFirmware214CountsSourcesFromZero() {
+        var g = GoStreamState()
+        g.firmware = "2.1.4"
+        g.deviceName = "OHStreamer"
+        g.program = 1      // Input 2 on the Deck's panel
+        g.preview = 0      // Input 1
+        g.live = 0
+        XCTAssertEqual(g.sourceOffset, 1)
+        let s = ATEMState(goStream: g)
+        XCTAssertEqual(s.product, "OHStreamer (GoStream)")
+        XCTAssertEqual(s.program[0], 2)
+        XCTAssertEqual(s.preview[0], 1)
+        XCTAssertEqual(Set(s.inputs.keys), [1, 2, 3, 4])
+        XCTAssertTrue(s.hasStreaming)
+        XCTAssertFalse(s.streaming)
+        XCTAssertFalse(s.hasRecording)
+        g.live = 1
+        XCTAssertTrue(ATEMState(goStream: g).streaming)
+    }
+
+    func testNewerFirmwareCountsFromOne() {
+        var g = GoStreamState()
+        g.firmware = "2.3.0"
+        g.program = 2
+        XCTAssertEqual(g.sourceOffset, 0)
+        XCTAssertEqual(ATEMState(goStream: g).program[0], 2)
+    }
+
+    func testErrorPacketsDecode() {
+        let frame = GoStreamCodec.encode(GoStreamCommand(id: "parse_error", type: .error,
+                                                          value: [.string("PARSE_ERROR_NOT_FOND_ID")]))
+        var decoder = GoStreamDecoder()
+        XCTAssertEqual(decoder.feed(frame).first?.type, .error)
+    }
+}

@@ -11,6 +11,8 @@ public enum GoStreamReqType: String {
     case get = "get"
     case set = "set"
     case push = "pus"
+    /// The switcher's answer to something it didn't understand (for example PARSE_ERROR_NOT_FOND_ID).
+    case error = "err"
 }
 
 public struct GoStreamCommand: Equatable {
@@ -165,6 +167,7 @@ public enum GoStreamID {
     public static let ftbStatus = "ftbStatus"
     public static let inputList = "inputList"
     public static let deviceType = "deviceType"
+    public static let deviceName = "deviceName"
     public static let version = "version"
     public static let transitionStyle = "transitionStyle"
     public static let transitionMixRate = "transitionMixRate"

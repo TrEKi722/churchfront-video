@@ -20,6 +20,22 @@ public struct GoStreamState: Equatable {
     /// The device type number the switcher reports (0 Deck, 1 Duet SDI, 10 Duet 8 ISO, ...).
     public var deviceModel: Int?
     public var firmware: String?
+    public var deviceName: String?
+    /// 1 while streaming, from `live`. Firmware 2.1.4 has this but not liveStreamOutputStatus.
+    public var live: Int?
+    /// Command IDs the switcher has answered or pushed, so we only send ones this firmware knows.
+    public var known: Set<String> = []
+
+    /// Add this to a source number from the switcher to get the app's input number (Input 1 = 1).
+    /// Firmware before 2.3 numbers sources from 0 (seen on 2.1.4: program and preview only ever
+    /// reported 0 to 3 on four inputs); 2.3 and later number them from 1. This is inferred, not
+    /// documented, so check Live and Next against the Deck's own panel.
+    public var sourceOffset: Int {
+        guard let f = firmware else { return 0 }
+        let parts = f.split(separator: ".").compactMap { Int($0) }
+        guard parts.count >= 2 else { return 0 }
+        return (parts[0], parts[1]) < (2, 3) ? 1 : 0
+    }
     /// Source numbers the switcher says it has as inputs, from `inputList`.
     public var inputs: [Int] = []
     /// Fade to black: 0 off, 1 fully black, 2 fading.
@@ -96,6 +112,8 @@ public final class GoStreamClient: ObservableObject {
     public func requestState() {
         send([
             GoStreamCommands.get(GoStreamID.deviceType),
+            GoStreamCommands.get(GoStreamID.deviceName),
+            GoStreamCommands.get(GoStreamID.live),
             GoStreamCommands.get(GoStreamID.version),
             GoStreamCommands.get(GoStreamID.inputList),
             GoStreamCommands.get(GoStreamID.ftbStatus),
@@ -116,7 +134,7 @@ public final class GoStreamClient: ObservableObject {
                 let commands = self.decoder.feed([UInt8](data))
                 if !commands.isEmpty {
                     DispatchQueue.main.async {
-                        self.record(commands.map { "← \($0.type.rawValue) \($0.id) \(self.describe($0.value))" })
+                        self.record(commands.filter { !$0.id.hasPrefix("NDI") }.map { "← \($0.type.rawValue) \($0.id) \(self.describe($0.value))" })
                         for command in commands { self.apply(command) }
                     }
                 }
@@ -133,16 +151,23 @@ public final class GoStreamClient: ObservableObject {
 
     /// Updates state from a `get` reply or a `pus` push. Runs on the main thread.
     private func apply(_ command: GoStreamCommand) {
-        guard command.type != .set else { return }
+        guard command.type != .set, command.type != .error else { return }
         let numbers = (command.value ?? []).compactMap { v -> Int? in
             if case .number(let n) = v { return Int(n) } else { return nil }
         }
         let first = (command.value ?? []).first
         var next = state
+        next.known.insert(command.id)
         switch command.id {
         case GoStreamID.pgmIndex: next.program = numbers.first
         case GoStreamID.pvwIndex: next.preview = numbers.first
         case GoStreamID.transitionStatus: next.inTransition = numbers.first == 1
+        // Firmware 2.1.4 has no transitionStatus; autoTransition is pushed as 1 or 2 while one
+        // runs and 0 when it ends.
+        case GoStreamID.autoTransition: next.inTransition = (numbers.first ?? 0) != 0
+        case GoStreamID.live: next.live = numbers.first
+        case GoStreamID.deviceName:
+            if case .string(let s)? = first { next.deviceName = s }
         case GoStreamID.transitionStyle:
             if case .string(let s)? = first { next.transitionStyle = s }
         case GoStreamID.transitionMixRate: next.mixRate = numbers.first

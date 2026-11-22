@@ -50,6 +50,11 @@ not from OSEE, and this has not been run against real hardware yet.
   transition style (Mix, Dip, Wipe), mix rate, Stream and Record. It has no aux outputs, upstream
   keys, DSKs, macros or T-bar here, so those panels stay empty and their buttons do nothing.
 - Source names show as "Input 1" to "Input 4" for now.
+- Firmware matters. On firmware 2.1.4 (the one tested) the switcher has no input list, transition
+  style or rate, fade-to-black, or record commands, and it numbers sources from 0; the app copes by
+  using four inputs, reading transitions from the `autoTransition` push and streaming from `live`,
+  and it skips commands the switcher hasn't shown it knows (the Status page says so). Firmware 2.3
+  and later, which the Companion module targets, may expose more.
 - `python3 Tools/gostream_probe.py <ip>` reads the switcher without changing anything and prints what it says.
 - `python3 Tools/fake_gostream.py 19010` is a pretend GoStream for trying the app without one:
   `CUEVIDEO_HOST=127.0.0.1 CUEVIDEO_SWITCHER=gostream "./Churchfront Video.app/Contents/MacOS/CueVideo"`.
