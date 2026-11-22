@@ -463,8 +463,8 @@ final class AutoTracker: ObservableObject {
         s.lead += (Double(-dir) * size.leadRoom - s.lead) * 0.06
         let markX = 0.5 + s.lead
 
-        let ex = eye.x - markX                 // right of the mark: pan right
-        let ey = size.eyeLine - eye.y          // eyes above the line: tilt up
+        let exSeen = eye.x - markX             // right of the mark: pan right (as the picture shows it)
+        let eySeen = size.eyeLine - eye.y      // eyes above the line: tilt up (as the picture shows it)
         let k = config.trackSpeed
         let fovX = s.fov, fovY = s.fov * 9 / 16
         let tune = config.trackTuning
@@ -495,6 +495,18 @@ final class AutoTracker: ObservableObject {
             let dt = b.at.timeIntervalSince(a.at)
             if dt > 0.05, dt < 1 { camRX = (b.pan - a.pan) / dt / fovX; camRY = (b.tilt - a.tilt) / dt / fovY }
         }
+        // The picture is `latency` seconds old and the camera has kept turning since it was taken,
+        // so part of the error it shows has already been corrected. Take that out, or the loop keeps
+        // pushing on an error that's gone and swings past (the hunting seen with NDI|HX pictures
+        // that run about 0.9 s behind). Only from recent position reads, and bounded.
+        var turnedX = 0.0, turnedY = 0.0
+        if let then = before.last, let latest = s.polls.last, latest.at > then.at,
+           latest.at.timeIntervalSince(then.at) < 1.5, now.timeIntervalSince(latest.at) < 0.6 {
+            turnedX = max(-0.3, min(0.3, (latest.pan - then.pan) / fovX))   // frames the picture shifts left as the camera pans right
+            turnedY = max(-0.3, min(0.3, (latest.tilt - then.tilt) / fovY)) // and up as it tilts up
+        }
+        let ex = exSeen - turnedX
+        let ey = eySeen - turnedY
         s.moveX += ((s.imgVX + camRX) - s.moveX) * 0.2
         s.moveY += ((camRY - s.imgVY) - s.moveY) * 0.2
         // Only clear, steady movement one way for half a second counts as walking; anything
