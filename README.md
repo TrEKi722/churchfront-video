@@ -51,8 +51,11 @@ joystick and zoom, saved shots, and Track. Add it to the Home Screen for a full-
   be moved, and a camera on Live is never moved or tracked by mistake. A held joystick is kept alive by
   repeated messages, and the Mac stops the camera if they stop for 0.7 seconds, so a lost connection never
   leaves a camera moving.
-- Pictures are snapshots about two a second, not smooth video. The Mac only decodes a camera's picture
-  while a page is asking for it.
+- The Next and Live monitors are live picture streams (motion JPEG, up to about 15 frames a second, sent only
+  when the picture changes and the last frame has gone, so a slow network drops frames instead of building up a
+  delay). The small source tiles refresh about once a second each. The Mac only decodes a camera's picture while a
+  page is asking for it. Connections are kept open, and picture encoding runs apart from the buttons, so a busy
+  picture never makes a button wait.
 - The page can't change the setup. It uses plain HTTP, so anyone on the network who has the PIN can cut,
   fade and move cameras: use it on a network you trust, and press **New PIN** to log everyone out. Five
   wrong PINs lock logins for 30 seconds. Claude can't turn this on (`webControl` isn't in `update_config`).

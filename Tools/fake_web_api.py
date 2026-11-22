@@ -71,10 +71,13 @@ B = Booth()
 
 def jpeg(n):
     img = Image.new("RGB", (640, 360), [(40, 90, 160), (150, 60, 60), (60, 130, 80)][(n - 1) % 3])
-    d = ImageDraw.Draw(img); d.text((20, 20), f"Input {n}  {time.strftime('%H:%M:%S')}", fill="white")
+    d = ImageDraw.Draw(img); d.text((20, 20), f"Input {n}  {time.strftime('%H:%M:%S')}.{int((time.time() % 1) * 100):02d}", fill="white")
     out = io.BytesIO(); img.save(out, "JPEG"); return out.getvalue()
 
+STATS = {"stream_frames": 0, "streams_open": 0, "requests": 0}
+
 class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"          # keep-alive, like the Mac server
     def log_message(self, *a): pass
     def send(self, status, body, ctype="application/json"):
         if not isinstance(body, bytes): body = json.dumps(body).encode()
@@ -86,7 +89,29 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/": return self.send(200, page().encode(), "text/html; charset=utf-8")
         if u.path == "/_log": return self.send(200, B.log)
+        if u.path == "/_stats": return self.send(200, STATS)
         if u.path == "/_reset": B.reset(); return self.send(200, {"ok": True})
+        STATS["requests"] += 1
+        q = parse_qs(u.query)
+        if u.path == "/api/stream":      # a picture that keeps coming, like WebServer.serveStream
+            if q.get("t", [""])[0] != TOKEN and not self.authed(): return self.send(401, {"error": "Log in with the PIN."})
+            n = int(q.get("input", ["0"])[0]); fps = float(q.get("fps", ["12"])[0])
+            if n not in (1, 2): return self.send(204, b"", "text/plain")
+            self.send_response(200); self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store"); self.send_header("Connection", "close"); self.end_headers()
+            STATS["streams_open"] += 1
+            try:
+                while True:
+                    f = jpeg(n)
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(f)).encode() + b"\r\n\r\n" + f + b"\r\n")
+                    self.wfile.flush(); STATS["stream_frames"] += 1
+                    time.sleep(1 / fps)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                STATS["streams_open"] -= 1
+                self.close_connection = True
+            return
         if not self.authed(): return self.send(401, {"error": "Log in with the PIN."})
         if u.path == "/api/state": return self.send(200, B.state())
         if u.path == "/api/picture":

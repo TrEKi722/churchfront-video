@@ -155,7 +155,10 @@ final class WebServer: ObservableObject {
             var buf = got
             if let data { buf.append(data) }
             if let req = ControlServer.parse(buf) {
-                self.handle(req) { status, type, body in self.reply(c, status, type, body) }
+                // HTTP/1.1 keeps the connection for the next request unless told otherwise, so a button
+                // press doesn't pay for a new connection each time.
+                let keep = req.headers["connection"]?.lowercased() != "close"
+                self.handle(req, c) { status, type, body in self.reply(c, status, type, body, keepAlive: keep) }
             } else if done || err != nil || buf.count > 1 << 20 {
                 c.cancel()
             } else {
@@ -164,10 +167,12 @@ final class WebServer: ObservableObject {
         }
     }
 
-    private func reply(_ c: NWConnection, _ status: Int, _ type: String, _ body: Data) {
+    private func reply(_ c: NWConnection, _ status: Int, _ type: String, _ body: Data, keepAlive: Bool) {
         let text = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 429: "Too Many Requests"][status] ?? "OK"
-        let head = "HTTP/1.1 \(status) \(text)\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
-        c.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in c.cancel() })
+        let head = "HTTP/1.1 \(status) \(text)\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: \(keepAlive ? "keep-alive" : "close")\r\n\r\n"
+        c.send(content: Data(head.utf8) + body, completion: .contentProcessed { [weak self] error in
+            if keepAlive, error == nil { self?.receive(c, Data()) } else { c.cancel() }
+        })
     }
 
     private func json(_ done: @escaping (Int, String, Data) -> Void, _ status: Int, _ obj: Any) {
@@ -175,7 +180,7 @@ final class WebServer: ObservableObject {
         done(status, "application/json; charset=utf-8", data)
     }
 
-    private func handle(_ r: ControlServer.Request, _ done: @escaping (Int, String, Data) -> Void) {
+    private func handle(_ r: ControlServer.Request, _ c: NWConnection, _ done: @escaping (Int, String, Data) -> Void) {
         let comps = URLComponents(string: "http://x" + r.path)
         let path = comps?.path ?? r.path
         let query = Dictionary((comps?.queryItems ?? []).compactMap { q in q.value.map { (q.name, $0) } }, uniquingKeysWith: { first, _ in first })
@@ -191,7 +196,11 @@ final class WebServer: ObservableObject {
         }
 
         guard path.hasPrefix("/api/") else { json(done, 404, ["error": "Not found."]); return }
-        guard let t = r.headers["x-token"], tokens.contains(t) else { json(done, 401, ["error": "Log in with the PIN."]); return }
+        // A picture in an <img> can't send headers, so those two endpoints also take the key in the address.
+        let fromAddress = path == "/api/stream" || path == "/api/picture"
+        guard let t = r.headers["x-token"] ?? (fromAddress ? query["t"] : nil), tokens.contains(t) else {
+            json(done, 401, ["error": "Log in with the PIN."]); return
+        }
 
         switch (r.method, path) {
         case ("GET", "/api/state"):
@@ -206,11 +215,17 @@ final class WebServer: ObservableObject {
             let width = min(1280, max(80, Int(query["w"] ?? "") ?? 640))
             DispatchQueue.main.async {
                 let image = self.pictureImage(input)
-                self.queue.async {
+                // Encoding is off this server's queue, so a picture never makes a button wait.
+                DispatchQueue.global(qos: .userInitiated).async {
                     guard let image, let jpeg = Self.jpeg(image, maxWidth: width, quality: 0.6) else { done(204, "text/plain", Data()); return }
                     done(200, "image/jpeg", jpeg)
                 }
             }
+        case ("GET", "/api/stream"):
+            let input = Int(query["input"] ?? "") ?? -1
+            let width = min(1280, max(80, Int(query["w"] ?? "") ?? 640))
+            let fps = min(30, max(2, Double(query["fps"] ?? "") ?? 12))
+            DispatchQueue.main.async { self.serveStream(c, input: input, width: width, fps: fps) }
         default:
             json(done, 404, ["error": "Not found."])
         }
@@ -268,6 +283,62 @@ final class WebServer: ObservableObject {
             "keys": store.config.keys.map { ["label": $0.label, "on": $0.isOn(s)] as [String: Any] },
             "shotSizes": ShotSize.allCases.map(\.rawValue),
         ]
+    }
+
+    // MARK: Picture streams (main thread)
+
+    /// State of one open picture stream. Only touched on the main thread.
+    private final class PictureStream {
+        var inFlight = false
+        var closed = false
+        var lastID: ObjectIdentifier?
+        var timer: DispatchSourceTimer?
+    }
+
+    /// A picture that keeps coming: multipart/x-mixed-replace, which a browser shows in a plain <img>.
+    /// A new frame goes out only when the picture has changed and the last one has been sent, so a slow
+    /// network skips frames instead of building up a delay.
+    private func serveStream(_ c: NWConnection, input: Int, width: Int, fps: Double) {
+        guard picture(for: input) != nil else {
+            reply(c, 204, "text/plain", Data(), keepAlive: false); return
+        }
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\nCache-Control: no-store\r\nPragma: no-cache\r\nConnection: close\r\n\r\n"
+        c.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
+        let st = PictureStream()
+        func close() {
+            st.closed = true
+            st.timer?.cancel(); st.timer = nil
+            c.cancel()
+        }
+        // The browser leaving shows up as a read finishing or failing.
+        c.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, done, err in
+            if done || err != nil { DispatchQueue.main.async { close() } }
+        }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: 1.0 / fps)
+        timer.setEventHandler { [weak self] in
+            guard let self, !st.closed, !st.inFlight, let img = self.pictureImage(input) else { return }
+            let id = ObjectIdentifier(img)
+            if id == st.lastID { return }
+            st.lastID = id
+            st.inFlight = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let jpeg = Self.jpeg(img, maxWidth: width, quality: 0.6) else {
+                    DispatchQueue.main.async { st.inFlight = false }; return
+                }
+                var part = Data("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpeg.count)\r\n\r\n".utf8)
+                part.append(jpeg)
+                part.append(Data("\r\n".utf8))
+                c.send(content: part, completion: .contentProcessed { error in
+                    DispatchQueue.main.async {
+                        st.inFlight = false
+                        if error != nil { close() }
+                    }
+                })
+            }
+        }
+        st.timer = timer
+        timer.resume()
     }
 
     // MARK: Pictures (main thread)

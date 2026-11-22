@@ -225,7 +225,9 @@ async function act(body, quiet) {
 
 // ---- Login
 function showLogin() {
-  polling = false; $("#app").hidden = true; $("#login").hidden = false; $("#pin").value = ""; $("#pin").focus();
+  polling = false; st = null;
+  for (const sel of ["#monNext img", "#monLive img"]) { const i = $(sel); clearTimeout(+i.dataset.retry || 0); i.dataset.input = ""; i.removeAttribute("src"); i.classList.remove("has"); }
+  $("#app").hidden = true; $("#login").hidden = false; $("#pin").value = ""; $("#pin").focus();
 }
 async function login() {
   $("#loginErr").textContent = "";
@@ -252,7 +254,7 @@ async function poll() {
     $("#offline").hidden = true;
     render();
   } catch (e) { if (e.message !== "login") $("#offline").hidden = false; }
-  setTimeout(poll, 400);
+  setTimeout(poll, 250);
 }
 
 function nameOf(s) { return s ? s.name : "Nothing"; }
@@ -274,7 +276,7 @@ function render() {
   rb.classList.toggle("on", !!st.recording); rb.textContent = st.recording ? "RECORDING" : "RECORD";
   $("#black").classList.toggle("on", !!st.black); $("#black").textContent = st.black ? "BLACK · ON" : "BLACK";
 
-  renderTiles(); renderKeys(); renderCamera();
+  renderTiles(); renderKeys(); renderCamera(); updateStreams();
 }
 
 function renderTiles() {
@@ -422,12 +424,36 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) stopE
 window.addEventListener("pagehide", stopEverything);
 window.addEventListener("blur", stopEverything);
 
-// ---- Pictures: one JPEG at a time per picture, swapped in when it arrives.
-async function loadPic(img, input, width) {
+// ---- Pictures. Next and Live are streams (the Mac pushes a new frame as soon as there is one, so there is no
+// ---- polling delay). The small tiles refresh one at a time, so they never use up the browser's connections.
+function hasPicture(input) { return !!(st && st.sources.some(s => s.input === input && s.picture)); }
+function setStream(img, input) {
+  const want = input && hasPicture(input) && !document.hidden ? String(input) : "";
+  if (img.dataset.input === want) return;
+  img.dataset.input = want;
+  clearTimeout(+img.dataset.retry || 0);
+  if (!want) { img.removeAttribute("src"); img.classList.remove("has"); return; }
+  img.src = "/api/stream?input=" + want + "&w=800&fps=15&t=" + encodeURIComponent(token) + "&n=" + Date.now();
+}
+for (const sel of ["#monNext img", "#monLive img"]) {
+  const img = $(sel);
+  img.addEventListener("load", () => img.classList.add("has"));
+  img.addEventListener("error", () => {
+    img.classList.remove("has"); img.dataset.input = "";            // try again shortly, if it should still be showing
+    img.dataset.retry = setTimeout(() => { if (st && polling) setStream(img, sel.includes("Next") ? st.next && st.next.input : st.live && st.live.input); }, 1500);
+  });
+}
+function updateStreams() {
+  setStream($("#monNext img"), st.next && st.next.input);
+  setStream($("#monLive img"), st.live && st.live.input);
+}
+document.addEventListener("visibilitychange", () => { if (st) updateStreams(); });
+
+async function loadTile(img, input) {
   if (!input || img.dataset.busy) return;
   img.dataset.busy = "1";
   try {
-    const r = await api("/api/picture?input=" + input + "&w=" + width);
+    const r = await api("/api/picture?input=" + input + "&w=240");
     if (r.status === 200) {
       const url = URL.createObjectURL(await r.blob()), old = img.dataset.url;
       img.src = url; img.dataset.url = url; img.classList.add("has");
@@ -436,14 +462,12 @@ async function loadPic(img, input, width) {
   } catch (e) {}
   delete img.dataset.busy;
 }
-let picTick = 0;
+let tileTurn = 0;
 function picLoop() {
   if (!polling) return;
   if (st && !document.hidden) {
-    loadPic($("#monNext img"), st.next && st.next.input, 800);
-    loadPic($("#monLive img"), st.live && st.live.input, 800);
-    if (picTick % 3 === 0) for (const b of $("#tiles").children) if (b.dataset.pic) loadPic(b.querySelector("img"), +b.dataset.input, 240);
-    picTick++;
+    const tiles = [...$("#tiles").children].filter(b => b.dataset.pic);
+    if (tiles.length) { const b = tiles[tileTurn++ % tiles.length]; loadTile(b.querySelector("img"), +b.dataset.input); }
   }
   setTimeout(picLoop, 500);
 }

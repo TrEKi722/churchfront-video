@@ -30,9 +30,25 @@ const log = async () => (await fetch(base + "/_log")).json();
   if (shots) await page.screenshot({ path: shots + "/landscape.png" });
 
   ok((await page.textContent("#monNext .label")) === "Cam 1" && (await page.textContent("#monLive .label")) === "Cam 2", "Next is Cam 1 and Live is Cam 2");
+
+  // Pictures: Next and Live are streams, so they should arrive many times a second, and keep changing.
+  const stats = async () => (await fetch(base + "/_stats")).json();
+  const a = await stats(); const shotA = await page.locator("#monNext").screenshot();
+  await sleep(1000);
+  const b = await stats(); const shotB = await page.locator("#monNext").screenshot();
+  const fps = (b.stream_frames - a.stream_frames) / 2;   // two streams
+  ok(b.streams_open === 2, "Next and Live each hold one picture stream open (" + b.streams_open + ")");
+  ok(fps >= 8, "each monitor gets at least 8 frames a second (" + fps.toFixed(1) + ")");
+  ok(Buffer.compare(shotA, shotB) !== 0, "the Next picture keeps changing");
   ok(await page.locator("#monNext img.has").count() === 1, "the Next picture loads");
   ok((await page.locator("#tiles .tile").count()) === 3, "three source tiles");
   ok(/Cam 1/.test(await page.textContent("#camname")), "camera panel shows the camera on Next");
+
+  // How quickly a tap shows up
+  { const t0 = Date.now(); await page.click('#tiles .tile[data-input="2"]');
+    await page.waitForFunction(() => document.querySelector("#monNext .label").textContent === "Cam 2");
+    const dt = Date.now() - t0; ok(dt < 600, "a tap shows on screen in " + dt + " ms");
+    await page.click('#tiles .tile[data-input="1"]'); await sleep(500); }
 
   // Take
   await page.click('#tiles .tile[data-input="3"]');
