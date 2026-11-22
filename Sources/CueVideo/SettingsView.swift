@@ -80,7 +80,9 @@ struct SetupTab: View {
             PageHeader(title: "Setup", purpose: page.purpose, help: page.help)
             Segments(items: SetupPage.allCases.map { ($0.title, $0.rawValue) }, selection: $pageRaw)
             switch page {
-            case .switcher: switcher
+            case .switcher:
+                switcher
+                WebControlCard()
             case .sources: sources
             case .keys: keyButtons
             case .cameras: cameras

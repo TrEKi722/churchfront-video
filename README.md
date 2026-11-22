@@ -39,6 +39,28 @@ M/E volunteers run, the source row, key buttons, cameras and each camera's saved
 shots. The app picks up edits to the file within a second, so a person or Claude
 can set Churchfront Video up by editing it. The camera admin login is never in this file.
 
+## iPad and web control
+
+Setup > Switcher > **iPad and web control** turns on a web page served by this Mac (port 9912, off by
+default). Open the address shown there in Safari on an iPad (or any browser on the same network), enter
+the 6 digit PIN, and run the booth from it while the Mac is used for something else: Next and Live
+pictures, the source row, Cut, Fade, Black, key buttons, Stream and Record (each asks first), the camera
+joystick and zoom, saved shots, and Track. Add it to the Home Screen for a full-screen app.
+
+- It works through the same tools Claude uses, so it keeps their safeguards: only the camera on Next can
+  be moved, and a camera on Live is never moved or tracked by mistake. A held joystick is kept alive by
+  repeated messages, and the Mac stops the camera if they stop for 0.7 seconds, so a lost connection never
+  leaves a camera moving.
+- Pictures are snapshots about two a second, not smooth video. The Mac only decodes a camera's picture
+  while a page is asking for it.
+- The page can't change the setup. It uses plain HTTP, so anyone on the network who has the PIN can cut,
+  fade and move cameras: use it on a network you trust, and press **New PIN** to log everyone out. Five
+  wrong PINs lock logins for 30 seconds. Claude can't turn this on (`webControl` isn't in `update_config`).
+- While it's on, the app asks macOS not to slow it down or sleep the Mac. macOS may ask to allow incoming
+  connections the first time.
+- `python3 Tools/fake_web_api.py 9930` serves the page against a pretend switcher, and
+  `node Tools/test_web_ui.js http://localhost:9930` drives it in a browser (needs Playwright).
+
 ## OSEE GoStream (experimental)
 
 Besides the ATEM, Churchfront Video can drive an OSEE GoStream Deck or Duet over its network

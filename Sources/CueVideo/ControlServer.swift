@@ -76,7 +76,7 @@ final class ControlServer {
     struct Request { let method: String; let path: String; let headers: [String: String]; let body: Data }
 
     /// A whole request, or nil while more bytes are needed.
-    private static func parse(_ d: Data) -> Request? {
+    static func parse(_ d: Data) -> Request? {
         guard let end = d.range(of: Data("\r\n\r\n".utf8)) else { return nil }
         let head = String(decoding: d[d.startIndex..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
         let first = head.first?.split(separator: " ") ?? []

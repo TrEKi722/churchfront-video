@@ -143,6 +143,9 @@ struct CueConfig: Codable, Equatable {
     var atemHost = ""
     /// "atem" (the default) or "goStream" (an OSEE GoStream Deck or Duet, port 19010).
     var switcher = SwitcherKind.atem
+    /// Lets an iPad or other browser on this network run the booth (see WebServer). Off unless turned
+    /// on in Setup; not settable by Claude, since it opens the Mac to the network.
+    var webControl = false
     /// The M/E the volunteer runs, counted from 1 as on the switcher.
     var me = 1
     /// The volunteer's source row, left to right. Inputs not listed stay out of their way.
@@ -173,13 +176,14 @@ struct CueConfig: Codable, Equatable {
 
     init() {}
 
-    private enum Keys: String, CodingKey { case atemHost, switcher, me, sources, cameras, keys, trackSpeed, ptzSpeed, trackTilt, trackZoom, mixNames, pictures, screens, routes, framing, trackTuning }
+    private enum Keys: String, CodingKey { case atemHost, switcher, webControl, me, sources, cameras, keys, trackSpeed, ptzSpeed, trackTilt, trackZoom, mixNames, pictures, screens, routes, framing, trackTuning }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         atemHost = try c.decodeIfPresent(String.self, forKey: .atemHost) ?? ""
         // Read as text so an unknown value falls back to ATEM instead of making the whole file unreadable.
         switcher = SwitcherKind.parse((try? c.decodeIfPresent(String.self, forKey: .switcher)).flatMap { $0 } ?? "")
+        webControl = (try? c.decodeIfPresent(Bool.self, forKey: .webControl)).flatMap { $0 } ?? false
         me = try c.decodeIfPresent(Int.self, forKey: .me) ?? 1
         sources = try c.decodeIfPresent([VolunteerSource].self, forKey: .sources) ?? []
         cameras = try c.decodeIfPresent([PTZCamera].self, forKey: .cameras) ?? []
@@ -328,6 +332,7 @@ final class ConfigStore: ObservableObject {
         if b.me != me { b.me = me }
         guard !readOnly else { return }
         if b.atem.host != config.atemHost || b.atem.kind != config.switcher { b.atem.connect(config.atemHost, kind: config.switcher) }
+        WebServer.shared.setEnabled(config.webControl)
         if b.ptz.cameras != config.cameras { b.ptz.cameras = config.cameras }
     }
 
