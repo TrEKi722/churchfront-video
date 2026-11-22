@@ -117,3 +117,26 @@ final class GoStreamOldFirmwareTests: XCTestCase {
         XCTAssertEqual(decoder.feed(frame).first?.type, .error)
     }
 }
+
+final class GoStreamValueTests: XCTestCase {
+    /// A real Deck sent pgmIndex 1, pvwIndex 0 and live 0. Swift treats a JSON 0 or 1 as a Bool too,
+    /// which once made the decoder drop exactly those values.
+    func testZeroAndOneSurviveDecoding() {
+        let sent = [GoStreamCommand(id: "pgmIndex", type: .get, value: [.number(1)]),
+                    GoStreamCommand(id: "pvwIndex", type: .get, value: [.number(0)]),
+                    GoStreamCommand(id: "live", type: .get, value: [.number(0)])]
+        var decoder = GoStreamDecoder()
+        XCTAssertEqual(decoder.feed(GoStreamCodec.encodeAll(sent)), sent)
+    }
+
+    func testRealDeckReplyDecodes() {
+        // JSON exactly as the Deck sent it, framed with the same helper the probe uses.
+        let json = Array(#"{"id": "pgmIndex", "type": "get", "value": [1]}"#.utf8)
+        var frame: [UInt8] = [0xEB, 0xA6, 0x00, UInt8((json.count + 2) & 0xFF), UInt8((json.count + 2) >> 8)] + json
+        let crc = GoStreamCodec.crc16Modbus(frame)
+        frame += [UInt8(crc & 0xFF), UInt8(crc >> 8)]
+        var decoder = GoStreamDecoder()
+        let out = decoder.feed(frame)
+        XCTAssertEqual(out, [GoStreamCommand(id: "pgmIndex", type: .get, value: [.number(1)])])
+    }
+}

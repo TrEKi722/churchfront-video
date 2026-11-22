@@ -594,8 +594,8 @@ enum StatusReport {
             }
         }()
         var rows: [(String, String)] = [
-            ("Connection", "\(link), \(b.atem.host.isEmpty ? "no address" : "\(b.atem.host) UDP 9910")"),
-            ("Model", s.product.isEmpty ? "Unknown until connected" : "\(s.product), protocol \(s.version)"),
+            ("Connection", "\(link), \(b.atem.host.isEmpty ? "no address" : "\(b.atem.host) \(b.atem.kind == .goStream ? "TCP 19010" : "UDP 9910")")"),
+            ("Model", s.product.isEmpty ? "Unknown until connected" : "\(s.product), \(b.atem.kind == .goStream ? "firmware" : "protocol") \(s.version)"),
             ("Size", "\(s.meCount) M/E, \(s.keyerCount) keys, \(s.dskCount) DSKs, \(s.auxCount) aux, \(s.inputs.count) sources"),
             ("The operator runs", "M/E \(b.me + 1)"),
         ]

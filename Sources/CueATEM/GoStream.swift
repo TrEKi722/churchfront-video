@@ -147,7 +147,9 @@ public struct GoStreamDecoder {
         var values: [GoStreamValue]?
         if let raw = object["value"] as? [Any] {
             values = raw.compactMap { item -> GoStreamValue? in
-                if let n = item as? NSNumber, !(item is Bool) { return .number(n.doubleValue) }
+                // Don't exclude Bool here: in Swift a JSON 0 or 1 also counts as a Bool, so doing that
+                // dropped program 1 and preview 0 from a real Deck. A true/false is read as 1/0.
+                if let n = item as? NSNumber { return .number(n.doubleValue) }
                 if let s = item as? String { return .string(s) }
                 return nil
             }
