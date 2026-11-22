@@ -123,6 +123,8 @@ final class AutoTracker: ObservableObject {
         /// Pan and tilt last sent, in the camera's units (hundredths of a degree a second).
         var sentPan = 0.0, sentTilt = 0.0, sentZoom = 0.0
         var panDir = 0, panDirSince = Date()
+        /// The integral term of the pan and tilt control: error summed over time (frames x seconds).
+        var intX = 0.0, intY = 0.0
 
         // Motion, measured. The camera reports its angle of view, so moves are worked out in
         // real angles: how fast the person is really going, and how fast the camera really
@@ -505,8 +507,8 @@ final class AutoTracker: ObservableObject {
             turnedX = max(-0.3, min(0.3, (latest.pan - then.pan) / fovX))   // frames the picture shifts left as the camera pans right
             turnedY = max(-0.3, min(0.3, (latest.tilt - then.tilt) / fovY)) // and up as it tilts up
         }
-        let ex = exSeen - turnedX
-        let ey = eySeen - turnedY
+        let exComp = exSeen - turnedX
+        let eyComp = eySeen - turnedY
         s.moveX += ((s.imgVX + camRX) - s.moveX) * 0.2
         s.moveY += ((camRY - s.imgVY) - s.moveY) * 0.2
         // Only clear, steady movement one way for half a second counts as walking; anything
@@ -520,6 +522,13 @@ final class AutoTracker: ObservableObject {
         let walkVX = walking(s.moveX, &s.walkX, &s.walkXSince, walkMin)
         let walkVY = walking(s.moveY, &s.walkY, &s.walkYSince, walkMin * 1.25)
         let relX = s.imgVX, relY = -s.imgVY
+
+        // Lead: the picture is `latency` old and the person has kept walking since, so they're further
+        // along than it shows. Add how far at their walking speed. Only while clearly walking, bounded.
+        // (The delay setting matters: guessing it too long leads them too far.)
+        let leadBy = tune.lead ?? 1.0
+        let ex = exComp + max(-0.25, min(0.25, walkVX * latency * leadBy))
+        let ey = eyComp + max(-0.25, min(0.25, walkVY * latency * leadBy))
 
         // Edge alarm: how close their body is to the side of the frame they're heading for,
         // 0 (comfortable) to 1 (touching it). Near the edge the camera corrects harder.
@@ -550,9 +559,23 @@ final class AutoTracker: ObservableObject {
         // cutting it. tune.ease scales both (below 1 is softer, above 1 is snappier); near the
         // frame edge the limits open up so the camera can still catch someone.
         let ease = max(0.1, tune.ease ?? 1.0)
-        func rate(_ e: Double, _ move: Double, _ on: Bool, _ prev: Double) -> Double {
+        // PID. P: pull toward the mark (kp). I: sums the error while moving and clear of the inner
+        // dead zone, to take out a steady lag; it is limited so it can't add more than 0.12 frames a
+        // second, forgotten when the person crosses the mark or the camera stops, and held off near the
+        // frame edge. D: the error's rate of change, which is the person's speed minus the camera's, so
+        // it damps the camera's own speed.
+        let ki = max(0, tune.ki ?? 0.1), kd = max(0, tune.kd ?? 0.1)
+        let iMax = ki > 0 ? 0.12 / ki : 0
+        func integrate(_ i: inout Double, _ e: Double, _ on: Bool, _ dead: Double) {
+            guard on, ki > 0, abs(e) > dead * 0.5, urgency <= 0.3 else { i = 0; return }
+            if i * e < 0 { i = 0 }
+            i = max(-iMax, min(iMax, i + e * dtFrame))
+        }
+        integrate(&s.intX, ex, s.panning, size.deadX)
+        integrate(&s.intY, ey, s.tilting, size.deadY)
+        func rate(_ e: Double, _ move: Double, _ on: Bool, _ prev: Double, _ integral: Double, _ moveNow: Double) -> Double {
             let kp = min(2.5, min(1.6, (tune.correction ?? 1.2) * k) * (1 + 1.5 * urgency))
-            let want = on ? move + kp * e : 0
+            let want = on ? move + kp * e + ki * integral + kd * (moveNow - prev) : 0
             let urgent = urgency > 0.3
             let accel = (urgent ? 2.5 : 0.5) * ease * max(1, k) * dtFrame
             let decel = (urgent ? 4.0 : 0.8) * ease * max(1, k) * dtFrame
@@ -560,8 +583,8 @@ final class AutoTracker: ObservableObject {
             return prev + max(-step, min(step, want - prev))
         }
         let camNowX = s.sentPan / 100 * s.gainPan / fovX, camNowY = s.sentTilt / 100 * s.gainTilt / fovY
-        let rx = rate(ex, walkVX, s.panning, camNowX)
-        let ry = rate(ey, walkVY, s.tilting, camNowY)
+        let rx = rate(ex, walkVX, s.panning, camNowX, s.intX, s.moveX)
+        let ry = rate(ey, walkVY, s.tilting, camNowY, s.intY, s.moveY)
         let camX = camRX
         // Back into the camera's units: degrees a second (× 100), allowing for how it really turns.
         func units(_ r: Double, _ fov: Double, _ g: Double) -> Double {

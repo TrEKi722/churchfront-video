@@ -90,7 +90,7 @@ struct FramingRule: Codable, Hashable {
 /// correction: pull toward the framing mark (1.2); latency: how far behind the preview picture
 /// runs, in seconds (0.45); walkThreshold: how fast (frames a second) counts as walking (0.12);
 /// zoomThreshold: how wrong the size must look before zooming, as a log ratio (0.3, about a third);
-/// zoomWait: seconds it must stay wrong first (1.5); ease: how gently it starts and stops (1).
+/// zoomWait: seconds it must stay wrong first (1.5); ease: how gently it starts and stops (1); lead: leading a walker by the picture's delay (1); ki and kd: integral and derivative gains (0.1 each).
 struct TrackTuning: Codable, Hashable {
     var correction: Double?
     var latency: Double?
@@ -100,6 +100,13 @@ struct TrackTuning: Codable, Hashable {
     /// How gently the camera starts and stops moving (1 is the default; 0.5 is twice as slow to
     /// get going and to stop; 2 is snappier).
     var ease: Double?
+    /// Lead: how much of the person's walking speed over the picture's delay to add to where the picture
+    /// shows them, since they've moved on since it was taken (1 is full, 0 turns it off).
+    var lead: Double?
+    /// Integral and derivative gains next to `correction` (the proportional gain). The integral removes a
+    /// steady lag (default 0.1, 0 turns it off); the derivative damps the camera's speed (default 0.1).
+    var ki: Double?
+    var kd: Double?
     /// Narrowest angle of view (degrees) auto tracking may zoom in to. At a very tight shot a small
     /// pan error throws the person out of frame and a VISCA camera's slowest pan step is too coarse
     /// to correct it. Default 12 for VISCA cameras; Canon cameras have no limit unless this is set.

@@ -150,6 +150,17 @@ The Close / Waist / Full buttons under Track reframe the shot. Zooming by hand k
 
 The preview runs slightly behind real time, so tracking suits someone walking the stage, not running. Follow speed (0.5 to 2), tilt on/off and zoom-to-hold-size are in Setup and the config file (`trackSpeed`, `trackTilt`, `trackZoom`). The framing numbers live in `ShotSize` in `Tracker.swift`. Claude can use `start_tracking`, `set_tracking_shot` and `stop_tracking`.
 
+### How the camera is steered (PID, lead and easing)
+
+Pan and tilt use a PID loop on how far the person is from the framing mark, on top of feeding forward their walking speed. `trackTuning` in the setup file (or Claude's `set_tracking_tuning`) holds the knobs, all optional:
+
+- `correction` is the proportional gain (1.2), `ki` the integral (0.1) and `kd` the derivative (0.1). The integral takes out a steady lag and is limited and forgotten when the person crosses the mark; the derivative damps the camera's own speed.
+- `latency` is how far behind the preview picture runs (0.45 s; NDI|HX cameras can be near 0.9). It is used to correct the error for how far the camera has turned since the picture was taken, and `lead` (1; 0 turns it off) adds how far a walking person has moved on in that time. Set `latency` as close to the truth as you can: a value that's too long leads people too far.
+- `ease` scales how gently the camera starts and stops (1; below 1 is softer).
+- `walkThreshold`, `minFOV` and the shot dead zones (`framing`) decide what counts as walking, how far in it may zoom and how far someone can drift before the camera moves.
+
+`python3 Tools/simulate_tracking.py` simulates the pan loop (a delayed, noisy picture and a lagging camera) to compare settings without a camera, and `python3 Tools/analyze_tracking.py` summarises a real run. To measure the picture delay, put a stopwatch in front of a camera and photograph the stopwatch and the Mac's tile for it together: the difference is the delay.
+
 ### Telling people apart
 
 Tracking keeps to one person by what they look like (clothes, build and colouring, worked out on this Mac with Apple's Vision framework), as well as by where they were. When two people cross it stays with the one it was following. After losing sight it waits for that person and does not pick up whoever is nearest; the badge says "Lost them, looking" until they're back, and clicking a person on the picture follows them instead. It is not face recognition and stores nothing between runs. People dressed alike are harder to tell apart: then it carries on by position while they're in sight.
