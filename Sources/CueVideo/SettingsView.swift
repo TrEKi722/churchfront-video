@@ -159,7 +159,9 @@ struct SetupTab: View {
                         } }
                     ))
                     .textFieldStyle(CueFieldStyle()).frame(width: 200)
-                    if ptz.cameras.contains(where: { $0.atemInput == s.input }) {
+                    // Only a Canon camera has a picture of its own (over HTTP). A VISCA camera, such as a
+                    // PTZOptics, needs an NDI picture here for its tile, snapshots and auto tracking.
+                    if ptz.cameras.contains(where: { $0.atemInput == s.input && $0.proto == .canonXC }) {
                         Label("The camera's own picture", systemImage: "video").font(.sans(12)).foregroundStyle(T.inkSubtle)
                     } else {
                         NDIPicker(selection: s.ndi, none: "No picture") { v in store.update { c in
@@ -623,7 +625,10 @@ enum StatusReport {
         let s = b.atem.state
         let input = c.atemInput.map { "\(s.inputs[$0]?.long ?? "input \($0)") (input \($0))" } ?? "not set"
         let picture: String = {
-            guard c.proto == .canonXC else { return "Not available for VISCA cameras" }
+            guard c.proto == .canonXC else {
+                if let n = b.store.ndi(c.atemInput) { return "NDI: \(n)" }
+                return "None. Pick an NDI picture for its switcher input in Setup > Sources (VISCA cameras have no picture of their own)."
+            }
             switch CanonFeedHub.shared.isLive(c) {
             case .some(true): return "Coming in (Canon video.cgi, motion JPEG)"
             case .some(false): return "Connecting or stopped"
