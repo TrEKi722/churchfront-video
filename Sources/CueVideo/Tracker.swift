@@ -566,11 +566,14 @@ final class AutoTracker: ObservableObject {
         if config.trackZoom, s.manualZoomAt == nil, let hold = s.holdScale, let sc = s.scale, person.scale != nil {
             let r = log(hold / sc)             // positive: they look too small, zoom in
             let dir = r > 0 ? 1 : -1
+            // Don't zoom in past a tight shot: the loop gets too touchy there (see TrackTuning.minFOV).
+            let minFOV = tune.minFOV ?? (cameras[s.camera]?.proto == .canonXC ? 0 : 12)
+            let tooTight = dir == 1 && s.fov <= minFOV
             if s.zooming {
-                if abs(r) < 0.08 || (dir != s.zoomDir) {
+                if abs(r) < 0.08 || (dir != s.zoomDir) || tooTight {
                     s.zooming = false; s.zoomEnded = now; s.zoomWrongSince = nil
                 }
-            } else if abs(r) > (tune.zoomThreshold ?? 0.3) {
+            } else if abs(r) > (tune.zoomThreshold ?? 0.3), !tooTight {
                 if s.zoomWrongSince == nil { s.zoomWrongSince = now }
                 let settled = now.timeIntervalSince(s.zoomEnded) > 2
                 let reversing = dir != s.zoomDir && now.timeIntervalSince(s.zoomEnded) < 5

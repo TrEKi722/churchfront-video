@@ -97,6 +97,10 @@ struct TrackTuning: Codable, Hashable {
     var walkThreshold: Double?
     var zoomThreshold: Double?
     var zoomWait: Double?
+    /// Narrowest angle of view (degrees) auto tracking may zoom in to. At a very tight shot a small
+    /// pan error throws the person out of frame and a VISCA camera's slowest pan step is too coarse
+    /// to correct it. Default 12 for VISCA cameras; Canon cameras have no limit unless this is set.
+    var minFOV: Double?
 }
 
 /// One change a routing button makes: send this source to this aux (counted from 1).

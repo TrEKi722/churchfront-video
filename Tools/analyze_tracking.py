@@ -72,6 +72,10 @@ def report(name, rows):
     print(f"\n=== {name}: {n} frames over {dur:.0f} s ({n / dur:.1f} frames/s analysed) ===")
     fov = [r["fov_deg"] for r in rows]
     gain = [r["pan_gain"] for r in rows]
+    if statistics.median(fov) < 12:
+        print(f"NOTE: the camera was zoomed in tight most of the time (median {statistics.median(fov):.1f} degrees). "
+              "At that angle a small pan error throws the person out of frame; tracking zoomed in to hold the "
+              "shot size on someone far away. Try a looser shot size, or turn off zoom-to-hold-size in Setup > Tracking.")
     print(f"angle of view: {min(fov):.1f} to {max(fov):.1f} degrees (median {statistics.median(fov):.1f})")
     print(f"learned pan gain (real turn rate / asked; 1.0 = camera turns as asked): "
           f"min {min(gain):.2f}, median {statistics.median(gain):.2f}, max {max(gain):.2f}"
