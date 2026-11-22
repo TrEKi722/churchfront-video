@@ -919,6 +919,7 @@ struct TrackButton: View {
             .disabled(CameraPicture.of(camera, store) == nil)
             .help(s == nil ? "Follow the person in the middle of the shot. Or click someone on the Next picture. Moving the joystick stops tracking."
                            : "Stop following. Moving the joystick or recalling a shot also stops it.")
+            FrameBoxControls(camera: camera, tracking: s?.size)
             if let s {
                 // The follow shot: tap to reframe. The highlighted one is what it's framing to.
                 HStack(spacing: 2) {

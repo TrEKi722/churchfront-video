@@ -82,9 +82,9 @@ enum ControlTools {
              ["labels": ["type": "array", "items": ["type": "object", "properties": ["person": any("A person's number, or a letter for everyone with that letter."), "label": str("A name or role, such as Pastor or Keys.")] as [String: Any]] as [String: Any],
                          "description": "Who is who."]], required: ["labels"]),
         tool("get_framing", "The follow-shot framing rules auto tracking uses for each shot size (shoulders, waist, full), the built-in standard and any changes, plus the tracking response settings. Use with camera_snapshots to judge framing."),
-        tool("set_framing", "Change how a follow shot is framed, live, while Churchfront Video runs: takes effect on tracking cameras within a frame. All measured as a share of the frame. eye_line: where the eyes sit, down from the top (less = less headroom). size: eyes-to-shoulders drop against frame height (bigger = tighter). lead_room: offset toward where they face or walk. dead_x / dead_y: how far they can drift before the camera moves. reset: true returns this size to the standard.",
+        tool("set_framing", "Change how a follow shot is framed, live, while Churchfront Video runs: takes effect on tracking cameras within a frame. All measured as a share of the frame. eye_line: where the eyes sit, down from the top (less = less headroom). size: eyes-to-shoulders drop against frame height (bigger = tighter). lead_room: offset toward where they face or walk. dead_x / dead_y: how far they can drift before the camera moves. mark_x: where across the picture the eyes are held (0.5 is the middle; lower is further left). reset: true returns this size to the standard.",
              ["shot": choice("Shot size.", ["shoulders", "waist", "full"]), "eye_line": num("0.1 to 0.5."), "size": num("Shoulders about 0.36, waist 0.21, full 0.095."),
-              "lead_room": num("0 to 0.2."), "dead_x": num("0.02 to 0.2."), "dead_y": num("0.02 to 0.2."), "reset": bool("Back to the standard.")], required: ["shot"]),
+              "lead_room": num("0 to 0.2."), "dead_x": num("0.02 to 0.3."), "dead_y": num("0.02 to 0.25."), "mark_x": num("0.1 to 0.9."), "reset": bool("Back to the standard.")], required: ["shot"]),
         tool("set_tracking_tuning", "Change how auto tracking responds, live. correction: pull toward the mark (default 1.2; higher reacts harder, too high wobbles). latency: seconds the preview runs behind (0.45). walk_threshold: speed in frames a second that counts as walking (0.12; higher ignores more small moves). zoom_threshold: how wrong the shot size must look before zooming (0.3, about a third). zoom_wait: seconds it must stay wrong first (1.5). ease: how gently it starts and stops (1; below 1 is softer). lead: how much to lead a walking person by the picture's delay (1; 0 is off). ki and kd: integral and derivative gains (0.1 each; 0 turns one off; correction is the proportional gain). speed: overall follow speed 0.5 to 4. reset: true returns all to defaults.",
              ["correction": num("0.4 to 2.5."), "latency": num("0.2 to 1.5."), "ease": num("0.2 to 3."), "lead": num("0 to 1.5."), "ki": num("0 to 0.5."), "kd": num("0 to 0.6."), "walk_threshold": num("0.05 to 0.4."), "zoom_threshold": num("0.1 to 0.8."),
               "zoom_wait": num("0.5 to 5."), "speed": num("0.5 to 4."), "reset": bool("Back to defaults.")]),
@@ -325,8 +325,9 @@ enum ControlTools {
                 if let v = clamp(a["eye_line"], 0.1, 0.5) { r.eyeLine = v }
                 if let v = clamp(a["size"], 0.04, 0.7) { r.scale = v }
                 if let v = clamp(a["lead_room"], 0, 0.2) { r.leadRoom = v }
-                if let v = clamp(a["dead_x"], 0.02, 0.2) { r.deadX = v }
-                if let v = clamp(a["dead_y"], 0.02, 0.2) { r.deadY = v }
+                if let v = clamp(a["dead_x"], 0.02, 0.3) { r.deadX = v }
+                if let v = clamp(a["dead_y"], 0.02, 0.25) { r.deadY = v }
+                if let v = clamp(a["mark_x"], 0.1, 0.9) { r.markX = v }
                 c.framing[z.rawValue] = r == FramingRule() ? nil : r
             }
             // Tracking cameras on this size reframe to it now.
@@ -633,7 +634,7 @@ enum ControlTools {
 
     static func framingReport() -> [String: Any] {
         func d(_ r: FramingRule) -> [String: Any] {
-            ["eye_line": r.eyeLine ?? 0, "size": r.scale ?? 0, "lead_room": r.leadRoom ?? 0, "dead_x": r.deadX ?? 0, "dead_y": r.deadY ?? 0]
+            ["eye_line": r.eyeLine ?? 0, "size": r.scale ?? 0, "lead_room": r.leadRoom ?? 0, "dead_x": r.deadX ?? 0, "dead_y": r.deadY ?? 0, "mark_x": r.markX ?? 0.5]
         }
         var shots: [String: Any] = [:]
         for z in ShotSize.allCases {

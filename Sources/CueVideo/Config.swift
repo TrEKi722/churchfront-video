@@ -78,11 +78,14 @@ struct FramingRule: Codable, Hashable {
     var leadRoom: Double?
     var deadX: Double?
     var deadY: Double?
+    /// Where across the picture the eyes are held, 0 (left edge) to 1 (right edge); 0.5, the middle, unless set.
+    /// The dead box on the camera view is centred on this and the eye line.
+    var markX: Double?
 
     func merged(_ o: FramingRule?) -> FramingRule {
         guard let o else { return self }
         return FramingRule(eyeLine: o.eyeLine ?? eyeLine, scale: o.scale ?? scale, leadRoom: o.leadRoom ?? leadRoom,
-                           deadX: o.deadX ?? deadX, deadY: o.deadY ?? deadY)
+                           deadX: o.deadX ?? deadX, deadY: o.deadY ?? deadY, markX: o.markX ?? markX)
     }
 }
 

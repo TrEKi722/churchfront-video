@@ -136,6 +136,9 @@ private struct TrackedPicture: View {
                         .position(x: r.midX, y: r.midY)
                         .animation(.linear(duration: 0.1), value: t)
                 }
+                if tracker.editingCamera == camera.id, onPick != nil {
+                    FrameBoxEditor(size: tracker.sessions[camera.id]?.size ?? tracker.editSize, picture: box)
+                }
                 if !live {
                     VStack(spacing: T.s1) {
                         ProgressView().controlSize(.small)
@@ -146,9 +149,10 @@ private struct TrackedPicture: View {
                     .background(RoundedRectangle(cornerRadius: T.rMD).fill(Color.black.opacity(0.6)))
                 }
             }
+            .coordinateSpace(name: "pic")
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .local) { p in
-                guard let onPick, box.width > 0, box.contains(p) else { return }
+                guard let onPick, box.width > 0, box.contains(p), tracker.editingCamera != camera.id else { return }
                 onPick(CGPoint(x: (p.x - box.minX) / box.width, y: (p.y - box.minY) / box.height))
             }
             .allowsHitTesting(onPick != nil)

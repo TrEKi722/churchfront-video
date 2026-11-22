@@ -150,6 +150,17 @@ The Close / Waist / Full buttons under Track reframe the shot. Zooming by hand k
 
 The preview runs slightly behind real time, so tracking suits someone walking the stage, not running. Follow speed (0.5 to 2), tilt on/off and zoom-to-hold-size are in Setup and the config file (`trackSpeed`, `trackTilt`, `trackZoom`). The framing numbers live in `ShotSize` in `Tracker.swift`. Claude can use `start_tracking`, `set_tracking_shot` and `stop_tracking`.
 
+### The dead box (frame box)
+
+Under **Track**, **Frame box** draws the shot's dead box on the Next picture: the eyes are held at its centre
+(marked "eyes here"), and the camera only moves once they leave it. Drag the box to put the person on the left
+or right of the shot (or higher or lower), drag a corner to resize both ways or a side to resize one way, and
+let go to save it. It is saved for the shot size (Close, Waist, Full) that's being tracked, or the one picked
+there when the camera isn't tracking. **Lead room** shifts the box toward the way they face or walk; set it to
+zero to keep the box exactly where you put it. In the setup file it is `framing.<size>`: `markX` (0 to 1 across,
+0.5 is the middle), `eyeLine`, `deadX` and `deadY` (half the box's width and height, as shares of the picture),
+which Claude can also set with `set_framing`.
+
 ### How the camera is steered (PID, lead and easing)
 
 Pan and tilt use a PID loop on how far the person is from the framing mark, on top of feeding forward their walking speed. `trackTuning` in the setup file (or Claude's `set_tracking_tuning`) holds the knobs, all optional:

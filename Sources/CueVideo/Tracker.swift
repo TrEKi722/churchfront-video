@@ -55,6 +55,8 @@ enum ShotSize: String, CaseIterable, Identifiable {
     /// How far they can drift across or up and down before the camera moves.
     var deadX: Double { rule.deadX ?? 0.07 }
     var deadY: Double { rule.deadY ?? 0.08 }
+    /// Where across the picture the eyes are held (0.5 is the middle). Lead room is added to this.
+    var markX: Double { min(0.9, max(0.1, rule.markX ?? 0.5)) }
 
     /// The size a framing is closest to, from its head scale and what's in shot.
     static func classify(scale: Double?, anklesInShot: Bool, hipsInShot: Bool) -> ShotSize? {
@@ -167,6 +169,10 @@ final class AutoTracker: ObservableObject {
     }
 
     @Published private(set) var sessions: [UUID: Session] = [:]
+    /// The camera whose dead box is being edited on its Next picture (see FrameBoxEditor), and the
+    /// shot size being edited when that camera isn't tracking.
+    @Published var editingCamera: UUID?
+    @Published var editSize: ShotSize = .waist
 
     private var feeds: [UUID: AnyCancellable] = [:]
     private var cameras: [UUID: PTZCamera] = [:]
@@ -497,7 +503,7 @@ final class AutoTracker: ObservableObject {
         // which way they face. Eased so the frame doesn't jump when they turn.
         let dir = s.panDir != 0 && now.timeIntervalSince(s.panDirSince) > 0.7 ? s.panDir : person.facing
         s.lead += (Double(-dir) * size.leadRoom - s.lead) * 0.06
-        let markX = 0.5 + s.lead
+        let markX = size.markX + s.lead
 
         let exSeen = eye.x - markX             // right of the mark: pan right (as the picture shows it)
         let eySeen = size.eyeLine - eye.y      // eyes above the line: tilt up (as the picture shows it)
