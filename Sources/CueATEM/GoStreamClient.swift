@@ -65,7 +65,10 @@ public final class GoStreamClient: ObservableObject {
         self.host = host
         DispatchQueue.main.async { self.link = .connecting; self.trace = []; self.state = GoStreamState() }
         decoder = GoStreamDecoder()
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        // No Nagle delay: the switcher answers one packet at a time and expects them as they're sent.
+        let parameters = NWParameters.tcp
+        if let tcp = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options { tcp.noDelay = true }
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: parameters)
         conn = connection
         connection.stateUpdateHandler = { [weak self, weak connection] newState in
             guard let self, let connection, self.conn === connection else { return }
@@ -97,11 +100,14 @@ public final class GoStreamClient: ObservableObject {
     @discardableResult
     public func send(_ commands: [GoStreamCommand]) -> Bool {
         guard let conn, !commands.isEmpty else { return false }
-        let bytes = GoStreamCodec.encodeAll(commands)
         record(commands.map { "→ \($0.type.rawValue) \($0.id) \(describe($0.value))" })
-        conn.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
-            if let error { DispatchQueue.main.async { self?.link = .offline(error.localizedDescription) } }
-        })
+        // One packet per write. Firmware 2.1.4 answered separate packets but a burst in one write
+        // is not known to work, so don't rely on it.
+        for command in commands {
+            conn.send(content: Data(GoStreamCodec.encode(command)), completion: .contentProcessed { [weak self] error in
+                if let error { DispatchQueue.main.async { self?.link = .offline(error.localizedDescription) } }
+            })
+        }
         return true
     }
 
@@ -109,22 +115,31 @@ public final class GoStreamClient: ObservableObject {
     public func send(_ command: GoStreamCommand) -> Bool { send([command]) }
 
     /// Asks for everything we track. Replies arrive as `get` packets, changes as `pus`.
+    /// Sent one at a time, 50 ms apart, the way the probe did (which the Deck answered), with the
+    /// ones every firmware has first. Unknown ones come back as errors, which are harmless.
     public func requestState() {
-        send([
-            GoStreamCommands.get(GoStreamID.deviceType),
-            GoStreamCommands.get(GoStreamID.deviceName),
-            GoStreamCommands.get(GoStreamID.live),
-            GoStreamCommands.get(GoStreamID.version),
-            GoStreamCommands.get(GoStreamID.inputList),
-            GoStreamCommands.get(GoStreamID.ftbStatus),
+        let asks = [
             GoStreamCommands.get(GoStreamID.pgmIndex),
             GoStreamCommands.get(GoStreamID.pvwIndex),
+            GoStreamCommands.get(GoStreamID.version),
+            GoStreamCommands.get(GoStreamID.deviceName),
+            GoStreamCommands.get(GoStreamID.live),
+            GoStreamCommands.get(GoStreamID.deviceType),
+            GoStreamCommands.get(GoStreamID.inputList),
             GoStreamCommands.get(GoStreamID.transitionStatus),
             GoStreamCommands.get(GoStreamID.transitionStyle),
             GoStreamCommands.get(GoStreamID.transitionMixRate),
+            GoStreamCommands.get(GoStreamID.ftbStatus),
             GoStreamCommands.get(GoStreamID.liveStreamOutputStatus, 0),
             GoStreamCommands.get(GoStreamID.recordStatus),
-        ])
+        ]
+        let connection = conn
+        for (i, ask) in asks.enumerated() {
+            queue.asyncAfter(deadline: .now() + .milliseconds(50 * i)) { [weak self] in
+                guard let self, self.conn === connection else { return }
+                self.send(ask)
+            }
+        }
     }
 
     private func receive(on connection: NWConnection) {

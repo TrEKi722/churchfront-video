@@ -541,10 +541,25 @@ struct StatusTab: View {
                 ForEach(atem.sentLog.reversed()) { e in
                     HStack(spacing: T.s3) {
                         Text(StatusReport.time(e.time)).font(.system(size: 12, design: .monospaced)).foregroundStyle(T.inkSubtle)
-                        Text(e.command).font(.system(size: 12, design: .monospaced)).foregroundStyle(T.inkMuted).frame(width: 44, alignment: .leading)
-                        Text(e.describe(atem.state)).font(.sans(12))
-                        if !e.sent { Text("not sent, switcher offline").font(.sans(11, .semibold)).foregroundStyle(T.warning) }
+                        if atem.kind == .goStream {
+                            Text(e.command).font(.sans(12))
+                        } else {
+                            Text(e.command).font(.system(size: 12, design: .monospaced)).foregroundStyle(T.inkMuted).frame(width: 44, alignment: .leading)
+                            Text(e.describe(atem.state)).font(.sans(12))
+                        }
+                        if !e.sent { Text(atem.kind == .goStream ? "not sent" : "not sent, switcher offline").font(.sans(11, .semibold)).foregroundStyle(T.warning) }
                     }
+                }
+            }
+            if atem.kind == .goStream {
+                Card(title: "GoStream packets",
+                     help: "→ is what this Mac asked or told the switcher, ← is what it answered or pushed. Errors mean the firmware doesn't know that command. The switcher's NDI list updates are left out.") {
+                    if atem.goStreamTrace.isEmpty {
+                        Text("Nothing yet.").font(.sans(12)).foregroundStyle(T.inkSubtle)
+                    }
+                    Text(atem.goStreamTrace.suffix(120).reversed().joined(separator: "\n"))
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(T.inkMuted)
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }

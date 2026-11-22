@@ -136,6 +136,8 @@ public final class ATEMClient: ObservableObject {
     @Published public private(set) var link: ATEMLink = .idle
     @Published public private(set) var host = ""
     @Published public private(set) var kind: SwitcherKind = .atem
+    /// What the GoStream sent and was sent (→ and ←), newest last, for the Status page.
+    @Published public private(set) var goStreamTrace: [String] = []
     /// Which end of the T-bar is at rest, per M/E. Flips when a transition
     /// finishes, as on a hardware panel.
     @Published public private(set) var tbarAtTop: [Int: Bool] = [:]
@@ -223,6 +225,7 @@ public final class ATEMClient: ObservableObject {
         kind = .goStream
         host = h
         state = ATEMState()
+        goStreamTrace = []
         guard !h.isEmpty else { link = .idle; return }
         link = .connecting
         let g = GoStreamClient()
@@ -236,6 +239,10 @@ public final class ATEMClient: ObservableObject {
             g.$link.receive(on: DispatchQueue.main).sink { [weak self] l in
                 guard let self, self.goStream === g else { return }
                 if self.link != l { self.link = l }
+            },
+            g.$trace.receive(on: DispatchQueue.main).sink { [weak self] t in
+                guard let self, self.goStream === g else { return }
+                self.goStreamTrace = t
             },
         ]
         g.connect(host: h, port: port)
