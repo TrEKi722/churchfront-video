@@ -125,6 +125,8 @@ final class AutoTracker: ObservableObject {
         var panDir = 0, panDirSince = Date()
         /// The integral term of the pan and tilt control: error summed over time (frames x seconds).
         var intX = 0.0, intY = 0.0
+        /// How long looking at one frame takes (smoothed, milliseconds), for the log.
+        var detectMs = 0.0
 
         // Motion, measured. The camera reports its angle of view, so moves are worked out in
         // real angles: how fast the person is really going, and how fast the camera really
@@ -170,6 +172,10 @@ final class AutoTracker: ObservableObject {
     private var cameras: [UUID: PTZCamera] = [:]
     private var pictures: [UUID: CameraPicture] = [:]
     private var busy: Set<UUID> = []
+    /// Frames skipped because the last one was still being looked at, and when each camera last had
+    /// everyone's look (appearance) worked out, so that isn't redone every frame.
+    private var dropped: [UUID: Int] = [:]
+    private var lastLook: [UUID: Date] = [:]
     private var waiters: [UUID: [(String?) -> Void]] = [:]
     private var timer: Timer?
     // Concurrent, so cameras tracking at once each get their own frames looked at; `busy` keeps
@@ -245,6 +251,8 @@ final class AutoTracker: ObservableObject {
         sessions[id] = nil
         feeds[id] = nil
         busy.remove(id)
+        dropped[id] = nil
+        lastLook[id] = nil
         cameras[id] = nil
         pictures.removeValue(forKey: id)?.release()
         if s.sentPan != 0 || s.sentTilt != 0 { ptz.trackDrive(pan: 0, tilt: 0, camera: id) }
@@ -267,20 +275,39 @@ final class AutoTracker: ObservableObject {
     // MARK: Frames
 
     private func frame(_ img: CGImage, _ id: UUID) {
-        guard sessions[id] != nil, !busy.contains(id) else { return }  // still working on the last frame: skip
+        guard sessions[id] != nil else { return }
+        guard !busy.contains(id) else { dropped[id, default: 0] += 1; return }  // still working on the last frame: skip
         busy.insert(id)
+        // Telling people apart by what they look like is the slow part (a neural network pass for each
+        // person), and only matters when someone else is near the person being followed, or when finding
+        // them again. So while following, do it for everyone about once a second, and in between only
+        // when two or more people are close enough to be mixed up.
+        let look: LookMode
+        if let s = sessions[id], let target = s.target, s.phase == .following,
+           Date().timeIntervalSince(lastLook[id] ?? .distantPast) < 1.0 {
+            let r = min(0.5, 0.2 + max(target.box.width, target.box.height) * 0.6)
+            look = .near(target.box.insetBy(dx: -r, dy: -r))
+        } else {
+            look = .all
+            lastLook[id] = Date()
+        }
         vision.async { [weak self] in
-            let people = Self.detect(img)
+            let began = Date()
+            let people = Self.detect(img, look: look)
+            let ms = Date().timeIntervalSince(began) * 1000
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.busy.remove(id)
-                self.update(id, people)
+                self.update(id, people, ms: ms)
             }
         }
     }
 
+    /// How many people's looks to work out in a frame.
+    enum LookMode { case all, near(CGRect) }
+
     /// People in a frame, with their landmarks where Vision can see them.
-    static func detect(_ img: CGImage) -> [TrackedPerson] {
+    static func detect(_ img: CGImage, look: LookMode = .all) -> [TrackedPerson] {
         let pose = VNDetectHumanBodyPoseRequest()
         let rects = VNDetectHumanRectanglesRequest()
         rects.upperBodyOnly = true
@@ -347,13 +374,20 @@ final class AutoTracker: ObservableObject {
         }
         // What each person looks like (the biggest few in the shot), to tell them apart.
         let biggest = found.indices.sorted { found[$0].box.width * found[$0].box.height > found[$1].box.width * found[$1].box.height }
-        for i in biggest.prefix(6) { found[i].appearance = Appearance.of(img, box: found[i].box) }
+        switch look {
+        case .all:
+            for i in biggest.prefix(6) { found[i].appearance = Appearance.of(img, box: found[i].box) }
+        case .near(let area):
+            let close = biggest.filter { found[$0].box.intersects(area) }
+            if close.count >= 2 { for i in close.prefix(4) { found[i].appearance = Appearance.of(img, box: found[i].box) } }
+        }
         return found
     }
 
-    private func update(_ id: UUID, _ people: [TrackedPerson]) {
+    private func update(_ id: UUID, _ people: [TrackedPerson], ms: Double = 0) {
         guard var s = sessions[id] else { return }
         let now = Date()
+        s.detectMs = s.detectMs == 0 ? ms : s.detectMs + (ms - s.detectMs) * 0.2
         s.people = people
         s.lastFrame = now
 
@@ -594,9 +628,9 @@ final class AutoTracker: ObservableObject {
         }
         let pan = units(rx, fovX, s.gainPan)
         let tilt = units(ry, fovY, s.gainTilt)
-        TrackLog.shared.write(String(format: "%.3f,%@,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.0f,%.0f,%.2f,%d,%.3f,%.3f",
+        TrackLog.shared.write(String(format: "%.3f,%@,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.0f,%.0f,%.2f,%d,%.3f,%.3f,%.0f,%d",
             now.timeIntervalSince1970, cameras[s.camera]?.name ?? "?", eye.x, ex, ey, s.imgVX, s.moveX, camX, rx,
-            s.fov, s.gainPan, pan, tilt, urgency, s.panning ? 1 : 0, box.minX, box.maxX))
+            s.fov, s.gainPan, pan, tilt, urgency, s.panning ? 1 : 0, box.minX, box.maxX, s.detectMs, dropped[s.camera] ?? 0))
 
         // Walking direction (the way the camera is following), for lead room.
         let d = pan > 150 ? 1 : (pan < -150 ? -1 : 0)
@@ -747,7 +781,7 @@ final class TrackLog {
     func write(_ line: String) {
         if handle == nil || lines > 20000 {
             try? handle?.close()
-            let head = "time,camera,eye_x,err_x,err_y,picture_vx,person_vx,camera_vx_then,want_vx,fov_deg,pan_gain,pan_sent,tilt_sent,edge_urgency,panning,box_min_x,box_max_x\n"
+            let head = "time,camera,eye_x,err_x,err_y,picture_vx,person_vx,camera_vx_then,want_vx,fov_deg,pan_gain,pan_sent,tilt_sent,edge_urgency,panning,box_min_x,box_max_x,detect_ms,dropped\n"
             FileManager.default.createFile(atPath: url.path, contents: Data(head.utf8))
             handle = try? FileHandle(forWritingTo: url)
             handle?.seekToEndOfFile()

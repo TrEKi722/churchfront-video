@@ -70,6 +70,15 @@ def report(name, rows):
     dur = rows[-1]["time"] - rows[0]["time"]
     n = len(rows)
     print(f"\n=== {name}: {n} frames over {dur:.0f} s ({n / dur:.1f} frames/s analysed) ===")
+    # How fast frames are being looked at. detect_ms and dropped are in newer logs only.
+    if "detect_ms" in rows[0]:
+        ms = sorted(r["detect_ms"] for r in rows if r["detect_ms"] > 0)
+        dropped = rows[-1].get("dropped", 0) - rows[0].get("dropped", 0)
+        if ms:
+            print(f"looking at a frame takes {statistics.median(ms):.0f} ms (90th percentile {ms[int(0.9 * (len(ms) - 1))]:.0f} ms); "
+                  f"{n / dur:.1f} frames a second looked at, {dropped:.0f} skipped while busy ({pct(dropped, dropped + n)} of the frames that arrived)")
+            print("  the picture the tracker steers by is at least that much older than the camera's own picture, so the `latency` setting "
+                  "should be the camera-to-Mac delay plus about this")
     fov = [r["fov_deg"] for r in rows]
     gain = [r["pan_gain"] for r in rows]
     if statistics.median(fov) < 12:
